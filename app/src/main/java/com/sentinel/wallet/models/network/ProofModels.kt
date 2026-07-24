@@ -18,22 +18,12 @@ data class ProofResponse(
     val proof: ProofData?
 )
 
-data class ProofData(
-    @SerializedName("claim_type")
-    val claimType: String,
+data class SetupRequest(
+    @SerializedName("birth_year")
+    val birthYear: Int
+)
 
-    @SerializedName("value")
-    val value: Boolean,
-
-    @SerializedName("challenge")
-    val challenge: String,
-
-    @SerializedName("timestamp")
-    val timestamp: String,
-
-    @SerializedName("signature")
-    val signature: String,
-
+data class PublicKeyResponse(
     @SerializedName("public_key")
     val publicKey: String
 )

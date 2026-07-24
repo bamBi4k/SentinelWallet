@@ -1,13 +1,34 @@
 package com.sentinel.wallet.repository
 
-import com.sentinel.wallet.models.Credential
+import android.content.Context
+import com.google.gson.Gson
+import com.sentinel.wallet.crypto.Ed25519Crypto
 import com.sentinel.wallet.models.Claim
+import com.sentinel.wallet.models.Credential
 import com.sentinel.wallet.models.network.*
 import com.sentinel.wallet.models.network.RetrofitClient
+import com.sentinel.wallet.storage.SecureKeyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.Instant
 
-class CredentialRepository {
+class CredentialRepository(private val context: Context) {
+
+    private val keyStore = SecureKeyStore(context)
+    private val gson = Gson()
+
+    fun ensureWalletKeys(): Pair<String, String> {
+        val privateKey = keyStore.getPrivateKey()
+        val publicKey = keyStore.getPublicKey()
+
+        if (privateKey != null && publicKey != null) {
+            return Pair(privateKey, publicKey)
+        }
+
+        val (newPrivate, newPublic) = Ed25519Crypto.generateKeyPair()
+        keyStore.saveKeys(newPrivate, newPublic)
+        return Pair(newPrivate, newPublic)
+    }
 
     suspend fun requestCredential(birthYear: Int): Result<Credential> = withContext(Dispatchers.IO) {
         try {
@@ -53,20 +74,38 @@ class CredentialRepository {
         }
     }
 
-    suspend fun generateProof(challenge: String, claimType: String): Result<ProofData> = withContext(Dispatchers.IO) {
-        try {
-            val request = ProofRequest(challenge, claimType)
-            val response = RetrofitClient.instance.generateProof(request)
+    suspend fun generateLocalProof(
+        challenge: String,
+        claimType: String,
+        credential: Credential
+    ): ProofData? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val (privateKey, publicKey) = ensureWalletKeys()
 
-            if (response.isSuccessful && response.body()?.status == "success") {
-                val proofData = response.body()?.proof
-                if (proofData != null) {
-                    return@withContext Result.success(proofData)
-                }
+                val proofData = mapOf(
+                    "claim_type" to claimType,
+                    "value" to credential.isVerified,
+                    "challenge" to challenge,
+                    "timestamp" to Instant.now().toString(),
+                    "public_key" to publicKey
+                )
+
+                val proofJson = gson.toJson(proofData)
+                val signature = Ed25519Crypto.signData(privateKey, proofJson.toByteArray())
+
+                ProofData(
+                    claimType = claimType,
+                    value = credential.isVerified,
+                    challenge = challenge,
+                    timestamp = proofData["timestamp"] as String,
+                    signature = signature,
+                    publicKey = publicKey
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
             }
-            return@withContext Result.failure(Exception("Proof generation failed"))
-        } catch (e: Exception) {
-            return@withContext Result.failure(e)
         }
     }
 

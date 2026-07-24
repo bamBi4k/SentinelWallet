@@ -1,5 +1,6 @@
 package com.sentinel.wallet.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sentinel.wallet.models.Claim
@@ -16,9 +17,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class WalletViewModel : ViewModel() {
+class WalletViewModel(private val context: Context) : ViewModel() {
 
-    private val repository = CredentialRepository()
+    private val repository = CredentialRepository(context)
 
     private val _uiState = MutableStateFlow(WalletUiState())
     val uiState: StateFlow<WalletUiState> = _uiState.asStateFlow()
@@ -71,7 +72,13 @@ class WalletViewModel : ViewModel() {
             }
 
             try {
-                // 1. Challenge erstellen
+                val currentState = _uiState.value.walletState
+                if (currentState !is WalletState.CredentialLoaded) {
+                    throw Exception("No credential loaded")
+                }
+
+                val credential = currentState.credential
+
                 val challengeResult = repository.createChallenge()
                 if (challengeResult.isFailure) {
                     throw challengeResult.exceptionOrNull() ?: Exception("Challenge creation failed")
@@ -79,19 +86,16 @@ class WalletViewModel : ViewModel() {
 
                 val challengeResponse = challengeResult.getOrThrow()
 
-                // 2. Proof generieren
-                val proofResult = repository.generateProof(
-                    challengeResponse.challenge,
-                    "AGE_OVER_18"
+                val proofData = repository.generateLocalProof(
+                    challenge = challengeResponse.challenge,
+                    claimType = "AGE_OVER_18",
+                    credential = credential
                 )
 
-                if (proofResult.isFailure) {
-                    throw proofResult.exceptionOrNull() ?: Exception("Proof generation failed")
+                if (proofData == null) {
+                    throw Exception("Local proof generation failed")
                 }
 
-                val proofData = proofResult.getOrThrow()
-
-                // 3. Proof verifizieren
                 val verifyResult = repository.verifyProof(
                     challengeResponse.sessionId,
                     proofData

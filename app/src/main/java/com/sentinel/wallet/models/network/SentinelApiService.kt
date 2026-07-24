@@ -1,6 +1,5 @@
 package com.sentinel.wallet.models.network
 
-import com.google.gson.annotations.SerializedName
 import com.sentinel.wallet.models.network.*
 import retrofit2.Response
 import retrofit2.http.*
@@ -28,13 +27,3 @@ interface SentinelApiService {
         @Body request: VerifyRequest
     ): Response<VerifyResponse>
 }
-
-data class SetupRequest(
-    @SerializedName("birth_year")
-    val birthYear: Int
-)
-
-data class PublicKeyResponse(
-    @SerializedName("public_key")
-    val publicKey: String
-)
