@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sentinel.wallet.models.Claim
 import com.sentinel.wallet.models.Credential
+import com.sentinel.wallet.models.network.ProofData
+import com.sentinel.wallet.repository.CredentialRepository
 import com.sentinel.wallet.ui.ProofResult
 import com.sentinel.wallet.ui.WalletState
 import com.sentinel.wallet.ui.WalletUiState
@@ -16,6 +18,8 @@ import kotlinx.coroutines.launch
 
 class WalletViewModel : ViewModel() {
 
+    private val repository = CredentialRepository()
+
     private val _uiState = MutableStateFlow(WalletUiState())
     val uiState: StateFlow<WalletUiState> = _uiState.asStateFlow()
 
@@ -23,36 +27,32 @@ class WalletViewModel : ViewModel() {
         loadCredential()
     }
 
-    private fun loadCredential() {
+    fun loadCredential(birthYear: Int = 2000) {
         viewModelScope.launch {
-            // Simulate loading from storage
-            delay(1000)
-
-            // TODO: Replace with actual storage loading
-            val demoCredential = createDemoCredential()
             _uiState.update { state ->
-                state.copy(
-                    walletState = WalletState.CredentialLoaded(demoCredential)
-                )
+                state.copy(walletState = WalletState.Loading)
+            }
+
+            val result = repository.requestCredential(birthYear)
+
+            result.onSuccess { credential ->
+                _uiState.update { state ->
+                    state.copy(
+                        walletState = WalletState.CredentialLoaded(credential)
+                    )
+                }
+            }.onFailure { error ->
+                _uiState.update { state ->
+                    state.copy(
+                        walletState = WalletState.Error(error.message ?: "Unknown error")
+                    )
+                }
             }
         }
     }
 
-    private fun createDemoCredential(): Credential {
-        val claims = listOf(
-            Claim.ageOver18(verified = true),
-            Claim.euCitizen(verified = true),
-            Claim.humanVerified(verified = true),
-            Claim.governmentVerified(verified = true)
-        )
-
-        return Credential(
-            userId = "demo_user_123",
-            issuer = "Sentinel Authority",
-            issuedAt = "2026-07-24T10:00:00Z",
-            claims = claims,
-            isVerified = true
-        )
+    fun refresh() {
+        loadCredential()
     }
 
     fun selectClaim(claim: Claim) {
@@ -70,32 +70,63 @@ class WalletViewModel : ViewModel() {
                 )
             }
 
-            // Simulate proof generation
-            delay(1500)
+            try {
+                // 1. Challenge erstellen
+                val challengeResult = repository.createChallenge()
+                if (challengeResult.isFailure) {
+                    throw challengeResult.exceptionOrNull() ?: Exception("Challenge creation failed")
+                }
 
-            // Simulate success
-            _uiState.update { state ->
-                state.copy(
-                    isProofGenerationInProgress = false,
-                    proofResult = ProofResult.Success
+                val challengeResponse = challengeResult.getOrThrow()
+
+                // 2. Proof generieren
+                val proofResult = repository.generateProof(
+                    challengeResponse.challenge,
+                    "AGE_OVER_18"
                 )
-            }
 
-            // Reset proof result after 3 seconds
-            delay(3000)
-            _uiState.update { state ->
-                state.copy(proofResult = null)
+                if (proofResult.isFailure) {
+                    throw proofResult.exceptionOrNull() ?: Exception("Proof generation failed")
+                }
+
+                val proofData = proofResult.getOrThrow()
+
+                // 3. Proof verifizieren
+                val verifyResult = repository.verifyProof(
+                    challengeResponse.sessionId,
+                    proofData
+                )
+
+                if (verifyResult.isSuccess && verifyResult.getOrThrow()) {
+                    _uiState.update { state ->
+                        state.copy(
+                            isProofGenerationInProgress = false,
+                            proofResult = ProofResult.Success
+                        )
+                    }
+                } else {
+                    throw Exception("Verification failed")
+                }
+
+                delay(3000)
+                _uiState.update { state ->
+                    state.copy(proofResult = null)
+                }
+
+            } catch (e: Exception) {
+                _uiState.update { state ->
+                    state.copy(
+                        isProofGenerationInProgress = false,
+                        proofResult = ProofResult.Failure(e.message ?: "Unknown error")
+                    )
+                }
+
+                delay(3000)
+                _uiState.update { state ->
+                    state.copy(proofResult = null)
+                }
             }
         }
-    }
-
-    fun refresh() {
-        _uiState.update { state ->
-            state.copy(
-                walletState = WalletState.Loading
-            )
-        }
-        loadCredential()
     }
 
     fun resetState() {
