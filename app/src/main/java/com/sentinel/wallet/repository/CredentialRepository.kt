@@ -1,6 +1,7 @@
 package com.sentinel.wallet.repository
 
 import android.content.Context
+import android.util.Log
 import com.google.gson.Gson
 import com.sentinel.wallet.crypto.Ed25519Crypto
 import com.sentinel.wallet.models.Claim
@@ -22,11 +23,16 @@ class CredentialRepository(private val context: Context) {
         val publicKey = keyStore.getPublicKey()
 
         if (privateKey != null && publicKey != null) {
-            return Pair(privateKey, publicKey)
+            // Prüfe, ob die Schlüssel gültig sind
+            if (privateKey.length > 0 && publicKey.length > 0) {
+                return Pair(privateKey, publicKey)
+            }
+            keyStore.clearKeys()
         }
 
         val (newPrivate, newPublic) = Ed25519Crypto.generateKeyPair()
         keyStore.saveKeys(newPrivate, newPublic)
+        Log.d("CredentialRepo", "✅ Neue Schlüssel generiert und gespeichert")
         return Pair(newPrivate, newPublic)
     }
 
@@ -83,7 +89,17 @@ class CredentialRepository(private val context: Context) {
             try {
                 val (privateKey, publicKey) = ensureWalletKeys()
 
-                val proofData = mapOf(
+                // Prüfe, ob die Schlüssel gültig sind (64 Zeichen Hex)
+                if (privateKey.length != 128 || publicKey.length != 64) {
+                    Log.e(
+                        "CredentialRepo",
+                        "❌ Ungültige Schlüssellänge: private=${privateKey.length}, public=${publicKey.length}"
+                    )
+                    return@withContext null
+                }
+
+                // Daten für Signatur vorbereiten (OHNE signature Feld)
+                val proofData: Map<String, Any> = mapOf(
                     "claim_type" to claimType,
                     "value" to credential.isVerified,
                     "challenge" to challenge,
@@ -91,8 +107,16 @@ class CredentialRepository(private val context: Context) {
                     "public_key" to publicKey
                 )
 
-                val proofJson = gson.toJson(proofData)
-                val signature = Ed25519Crypto.signData(privateKey, proofJson.toByteArray())
+                val proofJson = canonicalJson(proofData)
+
+                Log.d("SENTINEL_DEBUG", "========== SIGNED JSON ==========")
+                Log.d("SENTINEL_DEBUG", proofJson)
+                Log.d("SENTINEL_DEBUG", "==================================")
+
+                val dataBytes = proofJson.toByteArray(Charsets.UTF_8)
+
+                // Signatur generieren
+                val signature = Ed25519Crypto.signData(privateKey, dataBytes)
 
                 ProofData(
                     claimType = claimType,
@@ -103,11 +127,16 @@ class CredentialRepository(private val context: Context) {
                     publicKey = publicKey
                 )
             } catch (e: Exception) {
+                Log.e("CredentialRepo", "❌ Fehler bei Proof-Generierung", e)
                 e.printStackTrace()
-                null
+                return@withContext null
             }
         }
     }
+
+    // ============================================
+    // VERIFICATION
+    // ============================================
 
     suspend fun verifyProof(sessionId: String, proof: ProofData): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
@@ -121,5 +150,34 @@ class CredentialRepository(private val context: Context) {
         } catch (e: Exception) {
             return@withContext Result.failure(e)
         }
+    }
+
+    suspend fun verifyQrProof(sessionId: String, proof: ProofData): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val request = VerifyRequest(sessionId, proof)
+            val response = RetrofitClient.instance.verifyQrProof(request)
+
+            if (response.isSuccessful && response.body()?.status == "success") {
+                return@withContext Result.success(true)
+            }
+            return@withContext Result.failure(Exception("QR verification failed: ${response.body()?.message}"))
+        } catch (e: Exception) {
+            return@withContext Result.failure(e)
+        }
+    }
+    private fun canonicalJson(data: Map<String, Any>): String {
+        return data.toSortedMap()
+            .map { (key, value) ->
+                "\"$key\":${when(value) {
+                    is String -> "\"$value\""
+                    is Boolean -> value.toString()
+                    else -> value.toString()
+                }}"
+            }
+            .joinToString(
+                separator = ",",
+                prefix = "{",
+                postfix = "}"
+            )
     }
 }

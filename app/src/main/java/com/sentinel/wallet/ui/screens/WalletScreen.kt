@@ -5,6 +5,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -28,7 +30,8 @@ import com.sentinel.wallet.viewmodel.WalletViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WalletScreen(
-    viewModel: WalletViewModel = viewModel()
+    viewModel: WalletViewModel = viewModel(),
+    onOpenScanner: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -43,6 +46,13 @@ fun WalletScreen(
                     )
                 },
                 actions = {
+                    // QR-Code Scanner Button
+                    IconButton(onClick = onOpenScanner) {
+                        Icon(
+                            imageVector = Icons.Default.QrCodeScanner,
+                            contentDescription = "QR-Code scannen"
+                        )
+                    }
                     IconButton(onClick = { viewModel.refresh() }) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
@@ -162,6 +172,16 @@ fun CredentialLoadedState(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // QR-Ergebnis anzeigen (falls vorhanden)
+        if (uiState.qrVerificationResult != null) {
+            item {
+                QrVerificationResultCard(
+                    result = uiState.qrVerificationResult!!,
+                    onDismiss = { viewModel.clearQrResult() }
+                )
+            }
+        }
+
         item {
             StatusSection(
                 isVerified = credential.isVerified,
@@ -337,6 +357,51 @@ fun ProofResultCard(
                         color = Color(0xFFC62828)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun QrVerificationResultCard(
+    result: String,
+    onDismiss: () -> Unit
+) {
+    val isSuccess = result.contains("✅")
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSuccess) {
+                Color(0xFFE8F5E9)
+            } else {
+                Color(0xFFFFEBEE)
+            }
+        ),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = result,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (isSuccess) Color(0xFF2E7D32) else Color(0xFFC62828),
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Schließen"
+                )
             }
         }
     }

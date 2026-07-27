@@ -27,7 +27,8 @@ data class WalletUiState(
     val walletState: WalletState = WalletState.Loading,
     val selectedClaim: Claim? = null,
     val isProofGenerationInProgress: Boolean = false,
-    val proofResult: ProofResult? = null
+    val proofResult: ProofResult? = null,
+    val qrVerificationResult: String? = null  // ✅ NEU: QR-Ergebnis
 )
 
 sealed class ProofResult {

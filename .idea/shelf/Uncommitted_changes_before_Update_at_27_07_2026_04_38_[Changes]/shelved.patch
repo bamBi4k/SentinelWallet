@@ -1,0 +1,1145 @@
+Index: app/src/main/java/com/sentinel/wallet/MainActivity.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.sentinel.wallet\r\n\r\nimport android.os.Bundle\r\nimport androidx.activity.ComponentActivity\r\nimport androidx.activity.compose.setContent\r\nimport androidx.compose.foundation.layout.fillMaxSize\r\nimport androidx.compose.material3.Surface\r\nimport androidx.compose.ui.Modifier\r\nimport com.sentinel.wallet.ui.screens.WalletScreen\r\nimport com.sentinel.wallet.ui.theme.SentinelWalletTheme\r\nimport com.sentinel.wallet.viewmodel.WalletViewModel\r\n\r\nclass MainActivity : ComponentActivity() {\r\n    override fun onCreate(savedInstanceState: Bundle?) {\r\n        super.onCreate(savedInstanceState)\r\n        setContent {\r\n            SentinelWalletTheme {\r\n                Surface(\r\n                    modifier = Modifier.fillMaxSize()\r\n                ) {\r\n                    // Context wird hier übergeben\r\n                    WalletScreen(\r\n                        viewModel = WalletViewModel(this)\r\n                    )\r\n                }\r\n            }\r\n        }\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/MainActivity.kt b/app/src/main/java/com/sentinel/wallet/MainActivity.kt
+--- a/app/src/main/java/com/sentinel/wallet/MainActivity.kt	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ b/app/src/main/java/com/sentinel/wallet/MainActivity.kt	(date 1784881197999)
+@@ -5,7 +5,9 @@
+ import androidx.activity.compose.setContent
+ import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.material3.Surface
++import androidx.compose.runtime.*
+ import androidx.compose.ui.Modifier
++import com.sentinel.wallet.ui.screens.QrScannerScreen
+ import com.sentinel.wallet.ui.screens.WalletScreen
+ import com.sentinel.wallet.ui.theme.SentinelWalletTheme
+ import com.sentinel.wallet.viewmodel.WalletViewModel
+@@ -18,10 +20,29 @@
+                 Surface(
+                     modifier = Modifier.fillMaxSize()
+                 ) {
+-                    // Context wird hier übergeben
+-                    WalletScreen(
+-                        viewModel = WalletViewModel(this)
+-                    )
++                    // Navigation zwischen Wallet und Scanner
++                    var currentScreen by remember { mutableStateOf("wallet") }
++
++                    when (currentScreen) {
++                        "wallet" -> {
++                            WalletScreen(
++                                viewModel = WalletViewModel(this),
++                                onOpenScanner = {
++                                    currentScreen = "scanner"
++                                }
++                            )
++                        }
++                        "scanner" -> {
++                            QrScannerScreen(
++                                viewModel = WalletViewModel(this),
++                                onProofResult = { success ->
++                                    // Nach Verifizierung zurück zur Wallet
++                                    currentScreen = "wallet"
++                                }
++                                // onBack wurde entfernt!
++                            )
++                        }
++                    }
+                 }
+             }
+         }
+Index: app/src/main/java/com/sentinel/wallet/repository/CredentialRepository.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.sentinel.wallet.repository\r\n\r\nimport android.content.Context\r\nimport com.google.gson.Gson\r\nimport com.sentinel.wallet.crypto.Ed25519Crypto\r\nimport com.sentinel.wallet.models.Claim\r\nimport com.sentinel.wallet.models.Credential\r\nimport com.sentinel.wallet.models.network.*\r\nimport com.sentinel.wallet.models.network.RetrofitClient\r\nimport com.sentinel.wallet.storage.SecureKeyStore\r\nimport kotlinx.coroutines.Dispatchers\r\nimport kotlinx.coroutines.withContext\r\nimport java.time.Instant\r\n\r\nclass CredentialRepository(private val context: Context) {\r\n\r\n    private val keyStore = SecureKeyStore(context)\r\n    private val gson = Gson()\r\n\r\n    fun ensureWalletKeys(): Pair<String, String> {\r\n        val privateKey = keyStore.getPrivateKey()\r\n        val publicKey = keyStore.getPublicKey()\r\n\r\n        if (privateKey != null && publicKey != null) {\r\n            return Pair(privateKey, publicKey)\r\n        }\r\n\r\n        val (newPrivate, newPublic) = Ed25519Crypto.generateKeyPair()\r\n        keyStore.saveKeys(newPrivate, newPublic)\r\n        return Pair(newPrivate, newPublic)\r\n    }\r\n\r\n    suspend fun requestCredential(birthYear: Int): Result<Credential> = withContext(Dispatchers.IO) {\r\n        try {\r\n            val request = SetupRequest(birthYear)\r\n            val response = RetrofitClient.instance.setupCredential(request)\r\n\r\n            if (response.isSuccessful && response.body()?.status == \"success\") {\r\n                val credentialData = response.body()?.credential\r\n                if (credentialData != null) {\r\n                    val claims = listOf(\r\n                        Claim.ageOver18(credentialData.ageOver18),\r\n                        Claim.euCitizen(verified = true),\r\n                        Claim.humanVerified(verified = true),\r\n                        Claim.governmentVerified(verified = true)\r\n                    )\r\n\r\n                    val credential = Credential(\r\n                        userId = credentialData.userId,\r\n                        issuer = credentialData.issuer,\r\n                        issuedAt = credentialData.issuedAt,\r\n                        claims = claims,\r\n                        signature = credentialData.signature,\r\n                        isVerified = credentialData.ageOver18\r\n                    )\r\n                    return@withContext Result.success(credential)\r\n                }\r\n            }\r\n            return@withContext Result.failure(Exception(\"Credential request failed\"))\r\n        } catch (e: Exception) {\r\n            return@withContext Result.failure(e)\r\n        }\r\n    }\r\n\r\n    suspend fun createChallenge(): Result<ChallengeResponse> = withContext(Dispatchers.IO) {\r\n        try {\r\n            val response = RetrofitClient.instance.createChallenge()\r\n            if (response.isSuccessful && response.body() != null) {\r\n                return@withContext Result.success(response.body()!!)\r\n            }\r\n            return@withContext Result.failure(Exception(\"Challenge creation failed\"))\r\n        } catch (e: Exception) {\r\n            return@withContext Result.failure(e)\r\n        }\r\n    }\r\n\r\n    suspend fun generateLocalProof(\r\n        challenge: String,\r\n        claimType: String,\r\n        credential: Credential\r\n    ): ProofData? {\r\n        return withContext(Dispatchers.IO) {\r\n            try {\r\n                val (privateKey, publicKey) = ensureWalletKeys()\r\n\r\n                val proofData = mapOf(\r\n                    \"claim_type\" to claimType,\r\n                    \"value\" to credential.isVerified,\r\n                    \"challenge\" to challenge,\r\n                    \"timestamp\" to Instant.now().toString(),\r\n                    \"public_key\" to publicKey\r\n                )\r\n\r\n                val proofJson = gson.toJson(proofData)\r\n                val signature = Ed25519Crypto.signData(privateKey, proofJson.toByteArray())\r\n\r\n                ProofData(\r\n                    claimType = claimType,\r\n                    value = credential.isVerified,\r\n                    challenge = challenge,\r\n                    timestamp = proofData[\"timestamp\"] as String,\r\n                    signature = signature,\r\n                    publicKey = publicKey\r\n                )\r\n            } catch (e: Exception) {\r\n                e.printStackTrace()\r\n                null\r\n            }\r\n        }\r\n    }\r\n\r\n    suspend fun verifyProof(sessionId: String, proof: ProofData): Result<Boolean> = withContext(Dispatchers.IO) {\r\n        try {\r\n            val request = VerifyRequest(sessionId, proof)\r\n            val response = RetrofitClient.instance.verifyProof(request)\r\n\r\n            if (response.isSuccessful && response.body()?.status == \"success\") {\r\n                return@withContext Result.success(true)\r\n            }\r\n            return@withContext Result.failure(Exception(\"Verification failed: ${response.body()?.message}\"))\r\n        } catch (e: Exception) {\r\n            return@withContext Result.failure(e)\r\n        }\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/repository/CredentialRepository.kt b/app/src/main/java/com/sentinel/wallet/repository/CredentialRepository.kt
+--- a/app/src/main/java/com/sentinel/wallet/repository/CredentialRepository.kt	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ b/app/src/main/java/com/sentinel/wallet/repository/CredentialRepository.kt	(date 1785118330150)
+@@ -1,6 +1,7 @@
+ package com.sentinel.wallet.repository
+ 
+ import android.content.Context
++import android.util.Log
+ import com.google.gson.Gson
+ import com.sentinel.wallet.crypto.Ed25519Crypto
+ import com.sentinel.wallet.models.Claim
+@@ -22,11 +23,16 @@
+         val publicKey = keyStore.getPublicKey()
+ 
+         if (privateKey != null && publicKey != null) {
+-            return Pair(privateKey, publicKey)
++            // Prüfe, ob die Schlüssel gültig sind
++            if (privateKey.length > 0 && publicKey.length > 0) {
++                return Pair(privateKey, publicKey)
++            }
++            keyStore.clearKeys()
+         }
+ 
+         val (newPrivate, newPublic) = Ed25519Crypto.generateKeyPair()
+         keyStore.saveKeys(newPrivate, newPublic)
++        Log.d("CredentialRepo", "✅ Neue Schlüssel generiert und gespeichert")
+         return Pair(newPrivate, newPublic)
+     }
+ 
+@@ -83,6 +89,13 @@
+             try {
+                 val (privateKey, publicKey) = ensureWalletKeys()
+ 
++                // Prüfe, ob die Schlüssel gültig sind (64 Zeichen Hex)
++                if (privateKey.length != 64 || publicKey.length != 64) {
++                    Log.e("CredentialRepo", "❌ Ungültige Schlüssellänge: private=${privateKey.length}, public=${publicKey.length}")
++                    return@withContext null
++                }
++
++                // Daten für Signatur vorbereiten (OHNE signature Feld)
+                 val proofData = mapOf(
+                     "claim_type" to claimType,
+                     "value" to credential.isVerified,
+@@ -91,8 +104,18 @@
+                     "public_key" to publicKey
+                 )
+ 
++                // KEINE Leerzeichen nach Doppelpunkten!
++                val gson = Gson()
+                 val proofJson = gson.toJson(proofData)
+-                val signature = Ed25519Crypto.signData(privateKey, proofJson.toByteArray())
++
++                Log.d("SENTINEL_DEBUG", "========== SIGNED JSON ==========")
++                Log.d("SENTINEL_DEBUG", proofJson)
++                Log.d("SENTINEL_DEBUG", "==================================")
++
++                val dataBytes = proofJson.toByteArray(Charsets.UTF_8)
++
++                // Signatur generieren
++                val signature = Ed25519Crypto.signData(privateKey, dataBytes)
+ 
+                 ProofData(
+                     claimType = claimType,
+@@ -103,11 +126,16 @@
+                     publicKey = publicKey
+                 )
+             } catch (e: Exception) {
++                Log.e("CredentialRepo", "❌ Fehler bei Proof-Generierung", e)
+                 e.printStackTrace()
+-                null
++                return@withContext null
+             }
+         }
+     }
++
++    // ============================================
++    // VERIFICATION
++    // ============================================
+ 
+     suspend fun verifyProof(sessionId: String, proof: ProofData): Result<Boolean> = withContext(Dispatchers.IO) {
+         try {
+@@ -122,4 +150,18 @@
+             return@withContext Result.failure(e)
+         }
+     }
++
++    suspend fun verifyQrProof(sessionId: String, proof: ProofData): Result<Boolean> = withContext(Dispatchers.IO) {
++        try {
++            val request = VerifyRequest(sessionId, proof)
++            val response = RetrofitClient.instance.verifyQrProof(request)
++
++            if (response.isSuccessful && response.body()?.status == "success") {
++                return@withContext Result.success(true)
++            }
++            return@withContext Result.failure(Exception("QR verification failed: ${response.body()?.message}"))
++        } catch (e: Exception) {
++            return@withContext Result.failure(e)
++        }
++    }
+ }
+\ No newline at end of file
+Index: app/src/main/java/com/sentinel/wallet/crypto/Ed25519Crypto.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.sentinel.wallet.crypto\r\n\r\nimport org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters\r\nimport org.bouncycastle.crypto.params.Ed25519PublicKeyParameters\r\nimport org.bouncycastle.crypto.signers.Ed25519Signer\r\nimport org.bouncycastle.util.encoders.Hex\r\nimport java.security.SecureRandom\r\n\r\nobject Ed25519Crypto {\r\n\r\n    private val secureRandom = SecureRandom()\r\n\r\n    /**\r\n     * Generiert ein Ed25519 Schlüsselpaar\r\n     * @return Pair(privatKeyHex, publicKeyHex)\r\n     */\r\n    fun generateKeyPair(): Pair<String, String> {\r\n        // Generiere 32 Byte privaten Schlüssel\r\n        val privateKeyBytes = ByteArray(32)\r\n        secureRandom.nextBytes(privateKeyBytes)\r\n\r\n        // Erstelle private und public Key\r\n        val privateKey = Ed25519PrivateKeyParameters(privateKeyBytes, 0)\r\n        val publicKey = privateKey.generatePublicKey()\r\n\r\n        return Pair(\r\n            Hex.toHexString(privateKeyBytes),\r\n            Hex.toHexString(publicKey.encoded)\r\n        )\r\n    }\r\n\r\n    /**\r\n     * Signiert Daten mit Ed25519\r\n     * @param privateKeyHex Privater Schlüssel als Hex-String\r\n     * @param data Daten die signiert werden sollen\r\n     * @return Signatur als Hex-String\r\n     */\r\n    fun signData(privateKeyHex: String, data: ByteArray): String {\r\n        val privateKeyBytes = Hex.decode(privateKeyHex)\r\n        val privateKey = Ed25519PrivateKeyParameters(privateKeyBytes, 0)\r\n\r\n        val signer = Ed25519Signer()\r\n        signer.init(true, privateKey)\r\n        signer.update(data, 0, data.size)\r\n\r\n        val signature = signer.generateSignature()\r\n        return Hex.toHexString(signature)\r\n    }\r\n\r\n    /**\r\n     * Verifiziert eine Signatur\r\n     * @param publicKeyHex Öffentlicher Schlüssel als Hex-String\r\n     * @param data Ursprüngliche Daten\r\n     * @param signatureHex Signatur als Hex-String\r\n     * @return true wenn Signatur gültig\r\n     */\r\n    fun verifySignature(publicKeyHex: String, data: ByteArray, signatureHex: String): Boolean {\r\n        try {\r\n            val publicKeyBytes = Hex.decode(publicKeyHex)\r\n            val publicKey = Ed25519PublicKeyParameters(publicKeyBytes, 0)\r\n            val signatureBytes = Hex.decode(signatureHex)\r\n\r\n            val signer = Ed25519Signer()\r\n            signer.init(false, publicKey)\r\n            signer.update(data, 0, data.size)\r\n\r\n            return signer.verifySignature(signatureBytes)\r\n        } catch (e: Exception) {\r\n            return false\r\n        }\r\n    }\r\n\r\n    /**\r\n     * Konvertiert einen öffentlichen Schlüssel für die Übertragung\r\n     */\r\n    fun encodePublicKey(publicKeyHex: String): String {\r\n        return publicKeyHex\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/crypto/Ed25519Crypto.kt b/app/src/main/java/com/sentinel/wallet/crypto/Ed25519Crypto.kt
+--- a/app/src/main/java/com/sentinel/wallet/crypto/Ed25519Crypto.kt	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ b/app/src/main/java/com/sentinel/wallet/crypto/Ed25519Crypto.kt	(date 1785118695116)
+@@ -1,79 +1,93 @@
+ package com.sentinel.wallet.crypto
+ 
+-import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
+-import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
+-import org.bouncycastle.crypto.signers.Ed25519Signer
+-import org.bouncycastle.util.encoders.Hex
+-import java.security.SecureRandom
++import android.util.Log
++import com.goterl.lazysodium.LazySodiumAndroid
++import com.goterl.lazysodium.SodiumAndroid
++import com.goterl.lazysodium.utils.Key
++import com.goterl.lazysodium.utils.KeyPair
+ 
+ object Ed25519Crypto {
+ 
+-    private val secureRandom = SecureRandom()
++    private const val TAG = "Ed25519Crypto"
++
++    private val lazySodium = LazySodiumAndroid(SodiumAndroid())
+ 
+-    /**
+-     * Generiert ein Ed25519 Schlüsselpaar
+-     * @return Pair(privatKeyHex, publicKeyHex)
+-     */
++    init {
++        Log.d(TAG, "✅ LazySodium initialized")
++    }
++
+     fun generateKeyPair(): Pair<String, String> {
+-        // Generiere 32 Byte privaten Schlüssel
+-        val privateKeyBytes = ByteArray(32)
+-        secureRandom.nextBytes(privateKeyBytes)
++        return try {
++            val keyPair: KeyPair = lazySodium.cryptoSignKeypair()
++
++            val publicKeyHex = keyPair.publicKey.asHexString
++            val privateKeyHex = keyPair.secretKey.asHexString
++
++            Log.d(TAG, "✅ Ed25519 key pair generated")
+ 
+-        // Erstelle private und public Key
+-        val privateKey = Ed25519PrivateKeyParameters(privateKeyBytes, 0)
+-        val publicKey = privateKey.generatePublicKey()
++            Pair(publicKeyHex, privateKeyHex)
+ 
+-        return Pair(
+-            Hex.toHexString(privateKeyBytes),
+-            Hex.toHexString(publicKey.encoded)
+-        )
++        } catch (e: Exception) {
++            Log.e(TAG, "❌ Key generation failed: ${e.message}")
++            throw e
++        }
+     }
+ 
+-    /**
+-     * Signiert Daten mit Ed25519
+-     * @param privateKeyHex Privater Schlüssel als Hex-String
+-     * @param data Daten die signiert werden sollen
+-     * @return Signatur als Hex-String
+-     */
++
+     fun signData(privateKeyHex: String, data: ByteArray): String {
+-        val privateKeyBytes = Hex.decode(privateKeyHex)
+-        val privateKey = Ed25519PrivateKeyParameters(privateKeyBytes, 0)
++        return try {
++            val privateKey = Key.fromHexString(privateKeyHex)
+ 
+-        val signer = Ed25519Signer()
+-        signer.init(true, privateKey)
+-        signer.update(data, 0, data.size)
++            val message = data.toString(Charsets.UTF_8)
+ 
+-        val signature = signer.generateSignature()
+-        return Hex.toHexString(signature)
+-    }
++            val signature = lazySodium.cryptoSignDetached(
++                message,
++                privateKey
++            )
+ 
+-    /**
+-     * Verifiziert eine Signatur
+-     * @param publicKeyHex Öffentlicher Schlüssel als Hex-String
+-     * @param data Ursprüngliche Daten
+-     * @param signatureHex Signatur als Hex-String
+-     * @return true wenn Signatur gültig
+-     */
+-    fun verifySignature(publicKeyHex: String, data: ByteArray, signatureHex: String): Boolean {
+-        try {
+-            val publicKeyBytes = Hex.decode(publicKeyHex)
+-            val publicKey = Ed25519PublicKeyParameters(publicKeyBytes, 0)
+-            val signatureBytes = Hex.decode(signatureHex)
++            Log.d(TAG, "✅ Data signed")
+ 
+-            val signer = Ed25519Signer()
+-            signer.init(false, publicKey)
+-            signer.update(data, 0, data.size)
++            signature
+ 
+-            return signer.verifySignature(signatureBytes)
+         } catch (e: Exception) {
+-            return false
++            Log.e(TAG, "❌ Signing failed: ${e.message}")
++            throw e
+         }
+     }
+ 
+-    /**
+-     * Konvertiert einen öffentlichen Schlüssel für die Übertragung
+-     */
++
++    fun verifySignature(
++        publicKeyHex: String,
++        data: ByteArray,
++        signatureHex: String
++    ): Boolean {
++
++        return try {
++            val publicKey = Key.fromHexString(publicKeyHex)
++
++            val message = data.toString(Charsets.UTF_8)
++
++            lazySodium.cryptoSignVerifyDetached(
++                signatureHex,
++                message,
++                publicKey
++            )
++
++        } catch (e: Exception) {
++            Log.e(TAG, "❌ Verification failed: ${e.message}")
++            false
++        }
++    }
++
++
+     fun encodePublicKey(publicKeyHex: String): String {
+         return publicKeyHex
+     }
++
++
++    private fun ByteArray.toHexString(): String {
++        return joinToString("") {
++            "%02x".format(it)
++        }
++    }
+ }
+\ No newline at end of file
+Index: app/src/main/java/com/sentinel/wallet/viewmodel/WalletViewModel.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.sentinel.wallet.viewmodel\r\n\r\nimport android.content.Context\r\nimport androidx.lifecycle.ViewModel\r\nimport androidx.lifecycle.viewModelScope\r\nimport com.sentinel.wallet.models.Claim\r\nimport com.sentinel.wallet.models.Credential\r\nimport com.sentinel.wallet.models.network.ProofData\r\nimport com.sentinel.wallet.repository.CredentialRepository\r\nimport com.sentinel.wallet.ui.ProofResult\r\nimport com.sentinel.wallet.ui.WalletState\r\nimport com.sentinel.wallet.ui.WalletUiState\r\nimport kotlinx.coroutines.delay\r\nimport kotlinx.coroutines.flow.MutableStateFlow\r\nimport kotlinx.coroutines.flow.StateFlow\r\nimport kotlinx.coroutines.flow.asStateFlow\r\nimport kotlinx.coroutines.flow.update\r\nimport kotlinx.coroutines.launch\r\n\r\nclass WalletViewModel(private val context: Context) : ViewModel() {\r\n\r\n    private val repository = CredentialRepository(context)\r\n\r\n    private val _uiState = MutableStateFlow(WalletUiState())\r\n    val uiState: StateFlow<WalletUiState> = _uiState.asStateFlow()\r\n\r\n    init {\r\n        loadCredential()\r\n    }\r\n\r\n    fun loadCredential(birthYear: Int = 2000) {\r\n        viewModelScope.launch {\r\n            _uiState.update { state ->\r\n                state.copy(walletState = WalletState.Loading)\r\n            }\r\n\r\n            val result = repository.requestCredential(birthYear)\r\n\r\n            result.onSuccess { credential ->\r\n                _uiState.update { state ->\r\n                    state.copy(\r\n                        walletState = WalletState.CredentialLoaded(credential)\r\n                    )\r\n                }\r\n            }.onFailure { error ->\r\n                _uiState.update { state ->\r\n                    state.copy(\r\n                        walletState = WalletState.Error(error.message ?: \"Unknown error\")\r\n                    )\r\n                }\r\n            }\r\n        }\r\n    }\r\n\r\n    fun refresh() {\r\n        loadCredential()\r\n    }\r\n\r\n    fun selectClaim(claim: Claim) {\r\n        _uiState.update { state ->\r\n            state.copy(selectedClaim = claim)\r\n        }\r\n    }\r\n\r\n    fun generateProof() {\r\n        viewModelScope.launch {\r\n            _uiState.update { state ->\r\n                state.copy(\r\n                    isProofGenerationInProgress = true,\r\n                    proofResult = null\r\n                )\r\n            }\r\n\r\n            try {\r\n                val currentState = _uiState.value.walletState\r\n                if (currentState !is WalletState.CredentialLoaded) {\r\n                    throw Exception(\"No credential loaded\")\r\n                }\r\n\r\n                val credential = currentState.credential\r\n\r\n                val challengeResult = repository.createChallenge()\r\n                if (challengeResult.isFailure) {\r\n                    throw challengeResult.exceptionOrNull() ?: Exception(\"Challenge creation failed\")\r\n                }\r\n\r\n                val challengeResponse = challengeResult.getOrThrow()\r\n\r\n                val proofData = repository.generateLocalProof(\r\n                    challenge = challengeResponse.challenge,\r\n                    claimType = \"AGE_OVER_18\",\r\n                    credential = credential\r\n                )\r\n\r\n                if (proofData == null) {\r\n                    throw Exception(\"Local proof generation failed\")\r\n                }\r\n\r\n                val verifyResult = repository.verifyProof(\r\n                    challengeResponse.sessionId,\r\n                    proofData\r\n                )\r\n\r\n                if (verifyResult.isSuccess && verifyResult.getOrThrow()) {\r\n                    _uiState.update { state ->\r\n                        state.copy(\r\n                            isProofGenerationInProgress = false,\r\n                            proofResult = ProofResult.Success\r\n                        )\r\n                    }\r\n                } else {\r\n                    throw Exception(\"Verification failed\")\r\n                }\r\n\r\n                delay(3000)\r\n                _uiState.update { state ->\r\n                    state.copy(proofResult = null)\r\n                }\r\n\r\n            } catch (e: Exception) {\r\n                _uiState.update { state ->\r\n                    state.copy(\r\n                        isProofGenerationInProgress = false,\r\n                        proofResult = ProofResult.Failure(e.message ?: \"Unknown error\")\r\n                    )\r\n                }\r\n\r\n                delay(3000)\r\n                _uiState.update { state ->\r\n                    state.copy(proofResult = null)\r\n                }\r\n            }\r\n        }\r\n    }\r\n\r\n    fun resetState() {\r\n        _uiState.update { state ->\r\n            state.copy(\r\n                selectedClaim = null,\r\n                proofResult = null,\r\n                isProofGenerationInProgress = false\r\n            )\r\n        }\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/viewmodel/WalletViewModel.kt b/app/src/main/java/com/sentinel/wallet/viewmodel/WalletViewModel.kt
+--- a/app/src/main/java/com/sentinel/wallet/viewmodel/WalletViewModel.kt	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ b/app/src/main/java/com/sentinel/wallet/viewmodel/WalletViewModel.kt	(date 1784886127479)
+@@ -133,12 +133,95 @@
+         }
+     }
+ 
++    fun generateProofWithChallenge(sessionId: String, challenge: String, callback: (Boolean) -> Unit) {
++        viewModelScope.launch {
++            _uiState.update { state ->
++                state.copy(
++                    isProofGenerationInProgress = true,
++                    proofResult = null,
++                    qrVerificationResult = null
++                )
++            }
++
++            try {
++                val currentState = _uiState.value.walletState
++                if (currentState !is WalletState.CredentialLoaded) {
++                    throw Exception("No credential loaded")
++                }
++
++                val credential = currentState.credential
++
++                val proofData = repository.generateLocalProof(
++                    challenge = challenge,
++                    claimType = "AGE_OVER_18",
++                    credential = credential
++                )
++
++                if (proofData == null) {
++                    throw Exception("Local proof generation failed")
++                }
++
++                // ✅ RICHTIG: Verwende den Parameter sessionId (nicht challengeResponse!)
++                val verifyResult = repository.verifyProof(
++                    sessionId,
++                    proofData
++                )
++
++                if (verifyResult.isSuccess && verifyResult.getOrThrow()) {
++                    _uiState.update { state ->
++                        state.copy(
++                            isProofGenerationInProgress = false,
++                            proofResult = ProofResult.Success,
++                            qrVerificationResult = "✅ QR-Verifizierung erfolgreich!"
++                        )
++                    }
++                    callback(true)
++                } else {
++                    throw Exception("Verification failed")
++                }
++
++                delay(5000)
++                _uiState.update { state ->
++                    state.copy(
++                        proofResult = null,
++                        qrVerificationResult = null
++                    )
++                }
++
++            } catch (e: Exception) {
++                _uiState.update { state ->
++                    state.copy(
++                        isProofGenerationInProgress = false,
++                        proofResult = ProofResult.Failure(e.message ?: "Unknown error"),
++                        qrVerificationResult = "❌ QR-Verifizierung fehlgeschlagen: ${e.message}"
++                    )
++                }
++                callback(false)
++
++                delay(5000)
++                _uiState.update { state ->
++                    state.copy(
++                        proofResult = null,
++                        qrVerificationResult = null
++                    )
++                }
++            }
++        }
++    }
++
++    fun clearQrResult() {
++        _uiState.update { state ->
++            state.copy(qrVerificationResult = null)
++        }
++    }
++
+     fun resetState() {
+         _uiState.update { state ->
+             state.copy(
+                 selectedClaim = null,
+                 proofResult = null,
+-                isProofGenerationInProgress = false
++                isProofGenerationInProgress = false,
++                qrVerificationResult = null
+             )
+         }
+     }
+Index: app/src/main/java/com/sentinel/wallet/models/network/RetrofitClient.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.sentinel.wallet.models.network\r\n\r\nimport okhttp3.OkHttpClient\r\nimport okhttp3.logging.HttpLoggingInterceptor\r\nimport retrofit2.Retrofit\r\nimport retrofit2.converter.gson.GsonConverterFactory\r\nimport java.util.concurrent.TimeUnit\r\n\r\nobject RetrofitClient {\r\n\r\n    // Für lokale Entwicklung: Nutze deine PC-IP im selben Netzwerk\r\n    // Für Emulator: 10.0.2.2\r\n    // Für echtes Handy: Deine PC-IP (z.B. 192.168.1.100)\r\n    private const val BASE_URL = \"http://192.168.2.106:5000/\"  // ← DEINE IP HIER\r\n\r\n    private val loggingInterceptor = HttpLoggingInterceptor().apply {\r\n        level = HttpLoggingInterceptor.Level.BODY\r\n    }\r\n\r\n    private val okHttpClient = OkHttpClient.Builder()\r\n        .addInterceptor(loggingInterceptor)\r\n        .connectTimeout(30, TimeUnit.SECONDS)\r\n        .readTimeout(30, TimeUnit.SECONDS)\r\n        .writeTimeout(30, TimeUnit.SECONDS)\r\n        .build()\r\n\r\n    val instance: SentinelApiService by lazy {\r\n        Retrofit.Builder()\r\n            .baseUrl(BASE_URL)\r\n            .client(okHttpClient)\r\n            .addConverterFactory(GsonConverterFactory.create())\r\n            .build()\r\n            .create(SentinelApiService::class.java)\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/models/network/RetrofitClient.kt b/app/src/main/java/com/sentinel/wallet/models/network/RetrofitClient.kt
+--- a/app/src/main/java/com/sentinel/wallet/models/network/RetrofitClient.kt	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ b/app/src/main/java/com/sentinel/wallet/models/network/RetrofitClient.kt	(date 1784886508603)
+@@ -8,10 +8,7 @@
+ 
+ object RetrofitClient {
+ 
+-    // Für lokale Entwicklung: Nutze deine PC-IP im selben Netzwerk
+-    // Für Emulator: 10.0.2.2
+-    // Für echtes Handy: Deine PC-IP (z.B. 192.168.1.100)
+-    private const val BASE_URL = "http://192.168.2.106:5000/"  // ← DEINE IP HIER
++    private const val BASE_URL = "http://192.168.2.106:5000/"
+ 
+     private val loggingInterceptor = HttpLoggingInterceptor().apply {
+         level = HttpLoggingInterceptor.Level.BODY
+Index: app/src/main/java/com/sentinel/wallet/ui/screens/WalletScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.sentinel.wallet.ui.screens\r\n\r\nimport androidx.compose.foundation.layout.*\r\nimport androidx.compose.foundation.lazy.LazyColumn\r\nimport androidx.compose.foundation.lazy.items\r\nimport androidx.compose.foundation.shape.RoundedCornerShape\r\nimport androidx.compose.material.icons.Icons\r\nimport androidx.compose.material.icons.filled.Refresh\r\nimport androidx.compose.material3.*\r\nimport androidx.compose.runtime.Composable\r\nimport androidx.compose.runtime.collectAsState\r\nimport androidx.compose.runtime.getValue\r\nimport androidx.compose.ui.Alignment\r\nimport androidx.compose.ui.Modifier\r\nimport androidx.compose.ui.graphics.Color\r\nimport androidx.compose.ui.text.font.FontWeight\r\nimport androidx.compose.ui.unit.dp\r\nimport androidx.compose.ui.unit.sp\r\nimport androidx.lifecycle.viewmodel.compose.viewModel\r\n\r\nimport com.sentinel.wallet.ui.ProofResult\r\nimport com.sentinel.wallet.ui.WalletState\r\nimport com.sentinel.wallet.ui.WalletUiState\r\nimport com.sentinel.wallet.ui.components.ClaimCard\r\nimport com.sentinel.wallet.ui.components.StatusBadge\r\nimport com.sentinel.wallet.viewmodel.WalletViewModel\r\n\r\n@OptIn(ExperimentalMaterial3Api::class)\r\n@Composable\r\nfun WalletScreen(\r\n    viewModel: WalletViewModel = viewModel()\r\n) {\r\n    val uiState by viewModel.uiState.collectAsState()\r\n\r\n    Scaffold(\r\n        topBar = {\r\n            TopAppBar(\r\n                title = {\r\n                    Text(\r\n                        text = \"\uD83D\uDEE1\uFE0F Sentinel Wallet\",\r\n                        fontSize = 20.sp,\r\n                        fontWeight = FontWeight.Bold\r\n                    )\r\n                },\r\n                actions = {\r\n                    IconButton(onClick = { viewModel.refresh() }) {\r\n                        Icon(\r\n                            imageVector = Icons.Default.Refresh,\r\n                            contentDescription = \"Refresh\"\r\n                        )\r\n                    }\r\n                }\r\n            )\r\n        },\r\n        floatingActionButton = {\r\n            FloatingActionButton(\r\n                onClick = { viewModel.generateProof() },\r\n                containerColor = MaterialTheme.colorScheme.primary,\r\n                shape = RoundedCornerShape(16.dp)\r\n            ) {\r\n                Text(\r\n                    text = \"Present Proof\",\r\n                    color = Color.White,\r\n                    fontWeight = FontWeight.Bold\r\n                )\r\n            }\r\n        }\r\n    ) { paddingValues ->\r\n        Box(\r\n            modifier = Modifier\r\n                .fillMaxSize()\r\n                .padding(paddingValues)\r\n        ) {\r\n            when (val state = uiState.walletState) {\r\n                is WalletState.Loading -> {\r\n                    LoadingState()\r\n                }\r\n\r\n                is WalletState.NoCredential -> {\r\n                    NoCredentialState()\r\n                }\r\n\r\n                is WalletState.CredentialLoaded -> {\r\n                    CredentialLoadedState(\r\n                        uiState = uiState,\r\n                        viewModel = viewModel\r\n                    )\r\n                }\r\n\r\n                is WalletState.Error -> {\r\n                    ErrorState(\r\n                        message = state.message,\r\n                        onRetry = { viewModel.refresh() }\r\n                    )\r\n                }\r\n            }\r\n        }\r\n    }\r\n}\r\n\r\n@Composable\r\nfun LoadingState() {\r\n    Box(\r\n        modifier = Modifier.fillMaxSize(),\r\n        contentAlignment = Alignment.Center\r\n    ) {\r\n        Column(\r\n            horizontalAlignment = Alignment.CenterHorizontally\r\n        ) {\r\n            CircularProgressIndicator()\r\n            Spacer(modifier = Modifier.height(16.dp))\r\n            Text(\r\n                text = \"Loading wallet...\",\r\n                color = MaterialTheme.colorScheme.onSurfaceVariant\r\n            )\r\n        }\r\n    }\r\n}\r\n\r\n@Composable\r\nfun NoCredentialState() {\r\n    Box(\r\n        modifier = Modifier.fillMaxSize(),\r\n        contentAlignment = Alignment.Center\r\n    ) {\r\n        Column(\r\n            horizontalAlignment = Alignment.CenterHorizontally\r\n        ) {\r\n            Text(\r\n                text = \"\uD83D\uDD11\",\r\n                fontSize = 48.sp\r\n            )\r\n            Spacer(modifier = Modifier.height(16.dp))\r\n            Text(\r\n                text = \"No Credential Found\",\r\n                fontSize = 20.sp,\r\n                fontWeight = FontWeight.Bold\r\n            )\r\n            Spacer(modifier = Modifier.height(8.dp))\r\n            Text(\r\n                text = \"Request a credential from Sentinel Authority\",\r\n                color = MaterialTheme.colorScheme.onSurfaceVariant\r\n            )\r\n            Spacer(modifier = Modifier.height(16.dp))\r\n            Button(onClick = { /* TODO: Request credential */ }) {\r\n                Text(\"Request Credential\")\r\n            }\r\n        }\r\n    }\r\n}\r\n\r\n@Composable\r\nfun CredentialLoadedState(\r\n    uiState: WalletUiState,\r\n    viewModel: WalletViewModel\r\n) {\r\n    val credentialState = uiState.walletState as WalletState.CredentialLoaded\r\n    val credential = credentialState.credential\r\n\r\n    LazyColumn(\r\n        modifier = Modifier.fillMaxSize(),\r\n        contentPadding = PaddingValues(16.dp),\r\n        verticalArrangement = Arrangement.spacedBy(16.dp)\r\n    ) {\r\n        item {\r\n            StatusSection(\r\n                isVerified = credential.isVerified,\r\n                claimCount = credential.getClaimCount(),\r\n                verifiedCount = credential.getVerifiedClaimCount()\r\n            )\r\n        }\r\n\r\n        item {\r\n            CredentialInfoCard(credential = credential)\r\n        }\r\n\r\n        item {\r\n            Text(\r\n                text = \"Claims\",\r\n                fontSize = 18.sp,\r\n                fontWeight = FontWeight.Bold,\r\n                modifier = Modifier.padding(top = 8.dp)\r\n            )\r\n        }\r\n\r\n        items(credential.claims) { claim ->\r\n            ClaimCard(\r\n                claim = claim,\r\n                onClick = { viewModel.selectClaim(claim) },\r\n                isSelected = uiState.selectedClaim == claim\r\n            )\r\n        }\r\n\r\n        if (uiState.proofResult != null) {\r\n            item {\r\n                ProofResultCard(\r\n                    result = uiState.proofResult,\r\n                    isInProgress = uiState.isProofGenerationInProgress\r\n                )\r\n            }\r\n        }\r\n    }\r\n}\r\n\r\n@Composable\r\nfun StatusSection(\r\n    isVerified: Boolean,\r\n    claimCount: Int,\r\n    verifiedCount: Int\r\n) {\r\n    Card(\r\n        modifier = Modifier.fillMaxWidth(),\r\n        colors = CardDefaults.cardColors(\r\n            containerColor = if (isVerified) {\r\n                Color(0xFFE8F5E9)\r\n            } else {\r\n                MaterialTheme.colorScheme.surfaceVariant\r\n            }\r\n        ),\r\n        shape = RoundedCornerShape(12.dp)\r\n    ) {\r\n        Row(\r\n            modifier = Modifier\r\n                .fillMaxWidth()\r\n                .padding(16.dp),\r\n            horizontalArrangement = Arrangement.SpaceBetween,\r\n            verticalAlignment = Alignment.CenterVertically\r\n        ) {\r\n            Column {\r\n                Text(\r\n                    text = if (isVerified) \"\uD83D\uDFE2 Verified\" else \"\uD83D\uDFE1 Pending\",\r\n                    fontSize = 18.sp,\r\n                    fontWeight = FontWeight.Bold,\r\n                    color = if (isVerified) Color(0xFF2E7D32) else Color(0xFFF57F17)\r\n                )\r\n                Text(\r\n                    text = \"$verifiedCount / $claimCount claims verified\",\r\n                    fontSize = 14.sp,\r\n                    color = MaterialTheme.colorScheme.onSurfaceVariant\r\n                )\r\n            }\r\n            StatusBadge(isVerified = isVerified)\r\n        }\r\n    }\r\n}\r\n\r\n@Composable\r\nfun CredentialInfoCard(credential: com.sentinel.wallet.models.Credential) {\r\n    Card(\r\n        modifier = Modifier.fillMaxWidth(),\r\n        colors = CardDefaults.cardColors(\r\n            containerColor = MaterialTheme.colorScheme.surfaceVariant\r\n        ),\r\n        shape = RoundedCornerShape(12.dp)\r\n    ) {\r\n        Column(\r\n            modifier = Modifier\r\n                .fillMaxWidth()\r\n                .padding(16.dp)\r\n        ) {\r\n            Text(\r\n                text = \"\uD83D\uDCC4 Credential Details\",\r\n                fontSize = 14.sp,\r\n                fontWeight = FontWeight.SemiBold,\r\n                color = MaterialTheme.colorScheme.onSurfaceVariant\r\n            )\r\n            Spacer(modifier = Modifier.height(8.dp))\r\n            Row(\r\n                modifier = Modifier.fillMaxWidth(),\r\n                horizontalArrangement = Arrangement.SpaceBetween\r\n            ) {\r\n                Column {\r\n                    Text(\r\n                        text = \"Issuer\",\r\n                        fontSize = 12.sp,\r\n                        color = MaterialTheme.colorScheme.onSurfaceVariant\r\n                    )\r\n                    Text(\r\n                        text = credential.issuer,\r\n                        fontSize = 14.sp,\r\n                        fontWeight = FontWeight.Medium\r\n                    )\r\n                }\r\n                Column(horizontalAlignment = Alignment.End) {\r\n                    Text(\r\n                        text = \"Issued At\",\r\n                        fontSize = 12.sp,\r\n                        color = MaterialTheme.colorScheme.onSurfaceVariant\r\n                    )\r\n                    Text(\r\n                        text = credential.issuedAt.take(10),\r\n                        fontSize = 14.sp,\r\n                        fontWeight = FontWeight.Medium\r\n                    )\r\n                }\r\n            }\r\n        }\r\n    }\r\n}\r\n\r\n@Composable\r\nfun ProofResultCard(\r\n    result: ProofResult?,\r\n    isInProgress: Boolean\r\n) {\r\n    if (result == null) return\r\n\r\n    Card(\r\n        modifier = Modifier.fillMaxWidth(),\r\n        colors = CardDefaults.cardColors(\r\n            containerColor = when (result) {\r\n                is ProofResult.Success -> Color(0xFFE8F5E9)\r\n                is ProofResult.Failure -> Color(0xFFFFEBEE)\r\n            }\r\n        ),\r\n        shape = RoundedCornerShape(12.dp)\r\n    ) {\r\n        Row(\r\n            modifier = Modifier\r\n                .fillMaxWidth()\r\n                .padding(16.dp),\r\n            verticalAlignment = Alignment.CenterVertically\r\n        ) {\r\n            when (result) {\r\n                is ProofResult.Success -> {\r\n                    Text(\r\n                        text = \"✅ Proof Generated Successfully!\",\r\n                        fontSize = 16.sp,\r\n                        color = Color(0xFF2E7D32)\r\n                    )\r\n                }\r\n\r\n                is ProofResult.Failure -> {\r\n                    Text(\r\n                        text = \"❌ ${result.message}\",\r\n                        fontSize = 16.sp,\r\n                        color = Color(0xFFC62828)\r\n                    )\r\n                }\r\n            }\r\n        }\r\n    }\r\n}\r\n\r\n@Composable\r\nfun ErrorState(\r\n    message: String,\r\n    onRetry: () -> Unit\r\n) {\r\n    Box(\r\n        modifier = Modifier.fillMaxSize(),\r\n        contentAlignment = Alignment.Center\r\n    ) {\r\n        Column(\r\n            horizontalAlignment = Alignment.CenterHorizontally\r\n        ) {\r\n            Text(\r\n                text = \"❌\",\r\n                fontSize = 48.sp\r\n            )\r\n            Spacer(modifier = Modifier.height(16.dp))\r\n            Text(\r\n                text = \"Error Loading Wallet\",\r\n                fontSize = 20.sp,\r\n                fontWeight = FontWeight.Bold\r\n            )\r\n            Spacer(modifier = Modifier.height(8.dp))\r\n            Text(\r\n                text = message,\r\n                color = MaterialTheme.colorScheme.error\r\n            )\r\n            Spacer(modifier = Modifier.height(16.dp))\r\n            Button(onClick = onRetry) {\r\n                Text(\"Retry\")\r\n            }\r\n        }\r\n    }\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/ui/screens/WalletScreen.kt b/app/src/main/java/com/sentinel/wallet/ui/screens/WalletScreen.kt
+--- a/app/src/main/java/com/sentinel/wallet/ui/screens/WalletScreen.kt	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ b/app/src/main/java/com/sentinel/wallet/ui/screens/WalletScreen.kt	(date 1784882288882)
+@@ -5,6 +5,8 @@
+ import androidx.compose.foundation.lazy.items
+ import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.Close
++import androidx.compose.material.icons.filled.QrCodeScanner
+ import androidx.compose.material.icons.filled.Refresh
+ import androidx.compose.material3.*
+ import androidx.compose.runtime.Composable
+@@ -28,7 +30,8 @@
+ @OptIn(ExperimentalMaterial3Api::class)
+ @Composable
+ fun WalletScreen(
+-    viewModel: WalletViewModel = viewModel()
++    viewModel: WalletViewModel = viewModel(),
++    onOpenScanner: () -> Unit = {}
+ ) {
+     val uiState by viewModel.uiState.collectAsState()
+ 
+@@ -43,6 +46,13 @@
+                     )
+                 },
+                 actions = {
++                    // QR-Code Scanner Button
++                    IconButton(onClick = onOpenScanner) {
++                        Icon(
++                            imageVector = Icons.Default.QrCodeScanner,
++                            contentDescription = "QR-Code scannen"
++                        )
++                    }
+                     IconButton(onClick = { viewModel.refresh() }) {
+                         Icon(
+                             imageVector = Icons.Default.Refresh,
+@@ -162,6 +172,16 @@
+         contentPadding = PaddingValues(16.dp),
+         verticalArrangement = Arrangement.spacedBy(16.dp)
+     ) {
++        // QR-Ergebnis anzeigen (falls vorhanden)
++        if (uiState.qrVerificationResult != null) {
++            item {
++                QrVerificationResultCard(
++                    result = uiState.qrVerificationResult!!,
++                    onDismiss = { viewModel.clearQrResult() }
++                )
++            }
++        }
++
+         item {
+             StatusSection(
+                 isVerified = credential.isVerified,
+@@ -342,6 +362,51 @@
+     }
+ }
+ 
++@Composable
++fun QrVerificationResultCard(
++    result: String,
++    onDismiss: () -> Unit
++) {
++    val isSuccess = result.contains("✅")
++
++    Card(
++        modifier = Modifier
++            .fillMaxWidth()
++            .padding(horizontal = 4.dp),
++        colors = CardDefaults.cardColors(
++            containerColor = if (isSuccess) {
++                Color(0xFFE8F5E9)
++            } else {
++                Color(0xFFFFEBEE)
++            }
++        ),
++        shape = RoundedCornerShape(12.dp),
++        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
++    ) {
++        Row(
++            modifier = Modifier
++                .fillMaxWidth()
++                .padding(16.dp),
++            horizontalArrangement = Arrangement.SpaceBetween,
++            verticalAlignment = Alignment.CenterVertically
++        ) {
++            Text(
++                text = result,
++                fontSize = 16.sp,
++                fontWeight = FontWeight.Medium,
++                color = if (isSuccess) Color(0xFF2E7D32) else Color(0xFFC62828),
++                modifier = Modifier.weight(1f)
++            )
++            IconButton(onClick = onDismiss) {
++                Icon(
++                    imageVector = Icons.Default.Close,
++                    contentDescription = "Schließen"
++                )
++            }
++        }
++    }
++}
++
+ @Composable
+ fun ErrorState(
+     message: String,
+Index: app/src/main/java/com/sentinel/wallet/models/network/SentinelApiService.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.sentinel.wallet.models.network\r\n\r\nimport com.sentinel.wallet.models.network.*\r\nimport retrofit2.Response\r\nimport retrofit2.http.*\r\n\r\ninterface SentinelApiService {\r\n\r\n    @GET(\"/authority/public_key\")\r\n    suspend fun getPublicKey(): Response<PublicKeyResponse>\r\n\r\n    @POST(\"/demo/setup\")\r\n    suspend fun setupCredential(\r\n        @Body request: SetupRequest\r\n    ): Response<CredentialResponse>\r\n\r\n    @POST(\"/verifier/challenge\")\r\n    suspend fun createChallenge(): Response<ChallengeResponse>\r\n\r\n    @POST(\"/demo/proof\")\r\n    suspend fun generateProof(\r\n        @Body request: ProofRequest\r\n    ): Response<ProofResponse>\r\n\r\n    @POST(\"/verifier/verify\")\r\n    suspend fun verifyProof(\r\n        @Body request: VerifyRequest\r\n    ): Response<VerifyResponse>\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/models/network/SentinelApiService.kt b/app/src/main/java/com/sentinel/wallet/models/network/SentinelApiService.kt
+--- a/app/src/main/java/com/sentinel/wallet/models/network/SentinelApiService.kt	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ b/app/src/main/java/com/sentinel/wallet/models/network/SentinelApiService.kt	(date 1784886636511)
+@@ -1,6 +1,6 @@
+ package com.sentinel.wallet.models.network
+ 
+-import com.sentinel.wallet.models.network.*
++import com.google.gson.annotations.SerializedName
+ import retrofit2.Response
+ import retrofit2.http.*
+ 
+@@ -26,4 +26,39 @@
+     suspend fun verifyProof(
+         @Body request: VerifyRequest
+     ): Response<VerifyResponse>
+-}
+\ No newline at end of file
++
++    @POST("/qr/verify")
++    suspend fun verifyQrProof(
++        @Body request: VerifyRequest
++    ): Response<VerifyResponse>
++}
++
++// ============================================
++// NUR HIER DEFINIEREN!
++// ============================================
++
++data class SetupRequest(
++    @SerializedName("birth_year")
++    val birthYear: Int
++)
++
++data class PublicKeyResponse(
++    @SerializedName("public_key")
++    val publicKey: String
++)
++
++data class ProofRequest(
++    @SerializedName("challenge")
++    val challenge: String,
++
++    @SerializedName("claim_type")
++    val claimType: String
++)
++
++data class ProofResponse(
++    @SerializedName("status")
++    val status: String,
++
++    @SerializedName("proof")
++    val proof: ProofData?
++)
+\ No newline at end of file
+Index: app/build.gradle.kts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>plugins {\r\n    id(\"com.android.application\")\r\n    id(\"org.jetbrains.kotlin.android\")\r\n}\r\n\r\nandroid {\r\n    namespace = \"com.sentinel.wallet\"\r\n    compileSdk = 34\r\n\r\n    defaultConfig {\r\n        applicationId = \"com.sentinel.wallet\"\r\n        minSdk = 26\r\n        targetSdk = 34\r\n        versionCode = 1\r\n        versionName = \"0.1.0-alpha\"\r\n\r\n        testInstrumentationRunner = \"androidx.test.runner.AndroidJUnitRunner\"\r\n        vectorDrawables {\r\n            useSupportLibrary = true\r\n        }\r\n    }\r\n\r\n    buildTypes {\r\n        release {\r\n            isMinifyEnabled = false\r\n            proguardFiles(\r\n                getDefaultProguardFile(\"proguard-android-optimize.txt\"),\r\n                \"proguard-rules.pro\"\r\n            )\r\n        }\r\n    }\r\n    compileOptions {\r\n        sourceCompatibility = JavaVersion.VERSION_17\r\n        targetCompatibility = JavaVersion.VERSION_17\r\n    }\r\n    kotlinOptions {\r\n        jvmTarget = \"17\"\r\n    }\r\n    buildFeatures {\r\n        compose = true\r\n    }\r\n    composeOptions {\r\n        kotlinCompilerExtensionVersion = \"1.5.14\"\r\n    }\r\n    packaging {\r\n        resources {\r\n            excludes += \"/META-INF/{AL2.0,LGPL2.1}\"\r\n        }\r\n    }\r\n}\r\n\r\ndependencies {\r\n    implementation(\"androidx.core:core-ktx:1.13.1\")\r\n    implementation(\"androidx.lifecycle:lifecycle-runtime-ktx:2.8.0\")\r\n    implementation(\"androidx.activity:activity-compose:1.9.0\")\r\n\r\n    implementation(platform(\"androidx.compose:compose-bom:2024.06.00\"))\r\n    implementation(\"androidx.compose.ui:ui\")\r\n    implementation(\"androidx.compose.ui:ui-graphics\")\r\n    implementation(\"androidx.compose.ui:ui-tooling-preview\")\r\n    implementation(\"androidx.compose.material3:material3\")\r\n    implementation(\"androidx.compose.material:material-icons-extended\")\r\n\r\n    implementation(\"androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0\")\r\n\r\n    testImplementation(\"junit:junit:4.13.2\")\r\n    androidTestImplementation(\"androidx.test.ext:junit:1.1.5\")\r\n    androidTestImplementation(\"androidx.test.espresso:espresso-core:3.5.1\")\r\n    androidTestImplementation(platform(\"androidx.compose:compose-bom:2024.06.00\"))\r\n    androidTestImplementation(\"androidx.compose.ui:ui-test-junit4\")\r\n    debugImplementation(\"androidx.compose.ui:ui-tooling\")\r\n    debugImplementation(\"androidx.compose.ui:ui-test-manifest\")\r\n\r\n    // Networking\r\n    implementation(\"com.squareup.retrofit2:retrofit:2.9.0\")\r\n    implementation(\"com.squareup.retrofit2:converter-gson:2.9.0\")\r\n    implementation(\"com.squareup.okhttp3:okhttp:4.12.0\")\r\n    implementation(\"com.squareup.okhttp3:logging-interceptor:4.12.0\")\r\n\r\n    // Coroutines für Hintergrundaufgaben\r\n    implementation(\"org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3\")\r\n\r\n    // Gson (JSON Parsing)\r\n    implementation(\"com.google.code.gson:gson:2.10.1\")\r\n\r\n    // Kryptographie (Ed25519)\r\n    implementation(\"org.bouncycastle:bcprov-jdk15on:1.70\")\r\n    implementation(\"org.bouncycastle:bcpkix-jdk15on:1.70\")\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+--- a/app/build.gradle.kts	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ b/app/build.gradle.kts	(date 1785117846142)
+@@ -83,7 +83,12 @@
+     // Gson (JSON Parsing)
+     implementation("com.google.code.gson:gson:2.10.1")
+ 
+-    // Kryptographie (Ed25519)
+-    implementation("org.bouncycastle:bcprov-jdk15on:1.70")
+-    implementation("org.bouncycastle:bcpkix-jdk15on:1.70")
++    // Kryptographie (Ed25519) azysodium for Android
++    implementation("com.goterl:lazysodium-android:5.1.0@aar")
++    implementation("net.java.dev.jna:jna:5.13.0@aar")
++
++    // QR-Code Scanning
++    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
++
++
+ }
+\ No newline at end of file
+Index: app/src/main/AndroidManifest.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+><?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\r\n    xmlns:tools=\"http://schemas.android.com/tools\">\r\n\r\n    <uses-permission android:name=\"android.permission.INTERNET\" />\r\n    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />\r\n\r\n    <application\r\n        android:allowBackup=\"true\"\r\n        android:dataExtractionRules=\"@xml/data_extraction_rules\"\r\n        android:fullBackupContent=\"@xml/backup_rules\"\r\n        android:icon=\"@mipmap/ic_launcher\"\r\n        android:label=\"@string/app_name\"\r\n        android:roundIcon=\"@mipmap/ic_launcher_round\"\r\n        android:supportsRtl=\"true\"\r\n        android:theme=\"@style/Theme.SentinelWallet\"\r\n        android:usesCleartextTraffic=\"true\"\r\n        tools:targetApi=\"28\">\r\n\r\n        <activity\r\n            android:name=\".MainActivity\"\r\n            android:exported=\"true\"\r\n            android:label=\"@string/app_name\"\r\n            android:theme=\"@style/Theme.SentinelWallet\"\r\n            android:windowSoftInputMode=\"adjustResize\">\r\n            <intent-filter>\r\n                <action android:name=\"android.intent.action.MAIN\" />\r\n                <category android:name=\"android.intent.category.LAUNCHER\" />\r\n            </intent-filter>\r\n        </activity>\r\n\r\n    </application>\r\n\r\n</manifest>
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+--- a/app/src/main/AndroidManifest.xml	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ b/app/src/main/AndroidManifest.xml	(date 1784889041166)
+@@ -2,6 +2,10 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+     xmlns:tools="http://schemas.android.com/tools">
+ 
++    <uses-feature
++        android:name="android.hardware.camera"
++        android:required="false" />
++    <uses-permission android:name="android.permission.CAMERA" />
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+ 
+@@ -11,6 +15,7 @@
+         android:fullBackupContent="@xml/backup_rules"
+         android:icon="@mipmap/ic_launcher"
+         android:label="@string/app_name"
++        tools:replace="android:allowBackup"
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:supportsRtl="true"
+         android:theme="@style/Theme.SentinelWallet"
+Index: app/src/main/java/com/sentinel/wallet/ui/WalletState.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package com.sentinel.wallet.ui\r\n\r\nimport com.sentinel.wallet.models.Claim\r\nimport com.sentinel.wallet.models.Credential\r\n\r\n/**\r\n * Represents the entire UI state of the wallet\r\n */\r\nsealed class WalletState {\r\n    object Loading : WalletState()\r\n    object NoCredential : WalletState()\r\n\r\n    data class CredentialLoaded(\r\n        val credential: Credential,\r\n        val isConnected: Boolean = false\r\n    ) : WalletState()\r\n\r\n    data class Error(\r\n        val message: String\r\n    ) : WalletState()\r\n}\r\n\r\n/**\r\n * UI state for the wallet screen\r\n */\r\ndata class WalletUiState(\r\n    val walletState: WalletState = WalletState.Loading,\r\n    val selectedClaim: Claim? = null,\r\n    val isProofGenerationInProgress: Boolean = false,\r\n    val proofResult: ProofResult? = null\r\n)\r\n\r\nsealed class ProofResult {\r\n    object Success : ProofResult()\r\n    data class Failure(val message: String) : ProofResult()\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/ui/WalletState.kt b/app/src/main/java/com/sentinel/wallet/ui/WalletState.kt
+--- a/app/src/main/java/com/sentinel/wallet/ui/WalletState.kt	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ b/app/src/main/java/com/sentinel/wallet/ui/WalletState.kt	(date 1784882079178)
+@@ -27,7 +27,8 @@
+     val walletState: WalletState = WalletState.Loading,
+     val selectedClaim: Claim? = null,
+     val isProofGenerationInProgress: Boolean = false,
+-    val proofResult: ProofResult? = null
++    val proofResult: ProofResult? = null,
++    val qrVerificationResult: String? = null  // ✅ NEU: QR-Ergebnis
+ )
+ 
+ sealed class ProofResult {
+Index: app/src/main/java/com/sentinel/wallet/models/network/ProofModels.kt
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/models/network/ProofModels.kt b/app/src/main/java/com/sentinel/wallet/models/network/ProofModels.kt
+deleted file mode 100644
+--- a/app/src/main/java/com/sentinel/wallet/models/network/ProofModels.kt	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
++++ /dev/null	(revision b518d434b6dd3c32e68b0a5ac9cf2486c22ceb18)
+@@ -1,29 +0,0 @@
+-package com.sentinel.wallet.models.network
+-
+-import com.google.gson.annotations.SerializedName
+-
+-data class ProofRequest(
+-    @SerializedName("challenge")
+-    val challenge: String,
+-
+-    @SerializedName("claim_type")
+-    val claimType: String
+-)
+-
+-data class ProofResponse(
+-    @SerializedName("status")
+-    val status: String,
+-
+-    @SerializedName("proof")
+-    val proof: ProofData?
+-)
+-
+-data class SetupRequest(
+-    @SerializedName("birth_year")
+-    val birthYear: Int
+-)
+-
+-data class PublicKeyResponse(
+-    @SerializedName("public_key")
+-    val publicKey: String
+-)
+\ No newline at end of file
+Index: app/src/main/java/com/sentinel/wallet/ui/screens/QrScannerScreen.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/ui/screens/QrScannerScreen.kt b/app/src/main/java/com/sentinel/wallet/ui/screens/QrScannerScreen.kt
+new file mode 100644
+--- /dev/null	(date 1784881616164)
++++ b/app/src/main/java/com/sentinel/wallet/ui/screens/QrScannerScreen.kt	(date 1784881616164)
+@@ -0,0 +1,172 @@
++package com.sentinel.wallet.ui.screens
++
++import androidx.compose.foundation.layout.*
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.automirrored.filled.ArrowBack
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++import androidx.lifecycle.viewmodel.compose.viewModel
++import com.sentinel.wallet.ui.components.QrScannerButton
++import com.sentinel.wallet.viewmodel.WalletViewModel
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++fun QrScannerScreen(
++    viewModel: WalletViewModel = viewModel(),
++    onProofResult: (Boolean) -> Unit = {}
++) {
++    var scanResult by remember { mutableStateOf<String?>(null) }
++    var isVerifying by remember { mutableStateOf(false) }
++    var verificationResult by remember { mutableStateOf<String?>(null) }
++
++    Scaffold(
++        topBar = {
++            TopAppBar(
++                title = {
++                    Text(
++                        text = "📷 QR-Code Scanner",
++                        fontSize = 18.sp,
++                        fontWeight = FontWeight.Bold
++                    )
++                },
++                navigationIcon = {
++                    IconButton(
++                        onClick = {
++                            onProofResult(false)
++                        }
++                    ) {
++                        Icon(
++                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
++                            contentDescription = "Zurück"
++                        )
++                    }
++                }
++            )
++        }
++    ) { paddingValues ->
++        Column(
++            modifier = Modifier
++                .fillMaxSize()
++                .padding(paddingValues)
++                .padding(16.dp),
++            horizontalAlignment = Alignment.CenterHorizontally,
++            verticalArrangement = Arrangement.Center
++        ) {
++            Text(
++                text = "🛡️ QR-Code Verifizierung",
++                fontSize = 24.sp,
++                fontWeight = FontWeight.Bold,
++                modifier = Modifier.padding(bottom = 16.dp)
++            )
++
++            Text(
++                text = "Scanne den QR-Code von der Sentinel Website",
++                fontSize = 16.sp,
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
++                modifier = Modifier.padding(bottom = 32.dp)
++            )
++
++            QrScannerButton(
++                onScanResult = { result ->
++                    scanResult = result
++                    isVerifying = true
++                    verificationResult = null
++
++                    // Extrahiere session_id und challenge aus dem QR-Code
++                    val params = result.substringAfter("?").split("&")
++                    var sessionId = ""
++                    var challenge = ""
++
++                    params.forEach { param ->
++                        when {
++                            param.startsWith("session_id=") -> {
++                                sessionId = param.substringAfter("=")
++                            }
++                            param.startsWith("challenge=") -> {
++                                challenge = param.substringAfter("=")
++                            }
++                        }
++                    }
++
++                    if (sessionId.isNotEmpty() && challenge.isNotEmpty()) {
++                        viewModel.generateProofWithChallenge(sessionId, challenge) { success ->
++                            isVerifying = false
++                            if (success) {
++                                verificationResult = "✅ Verifizierung erfolgreich!"
++                                onProofResult(true)
++                            } else {
++                                verificationResult = "❌ Verifizierung fehlgeschlagen"
++                                onProofResult(false)
++                            }
++                        }
++                    } else {
++                        isVerifying = false
++                        verificationResult = "❌ Ungültiger QR-Code"
++                    }
++                },
++                modifier = Modifier
++                    .fillMaxWidth()
++                    .height(56.dp)
++            )
++
++            if (isVerifying) {
++                Spacer(modifier = Modifier.height(24.dp))
++                CircularProgressIndicator()
++                Text(
++                    text = "Verifiziere...",
++                    modifier = Modifier.padding(top = 8.dp),
++                    color = MaterialTheme.colorScheme.onSurfaceVariant
++                )
++            }
++
++            if (verificationResult != null) {
++                Spacer(modifier = Modifier.height(24.dp))
++                Card(
++                    modifier = Modifier.fillMaxWidth(),
++                    colors = CardDefaults.cardColors(
++                        containerColor = if (verificationResult!!.contains("✅")) {
++                            Color(0xFFE8F5E9)
++                        } else {
++                            Color(0xFFFFEBEE)
++                        }
++                    )
++                ) {
++                    Text(
++                        text = verificationResult!!,
++                        modifier = Modifier
++                            .padding(16.dp)
++                            .fillMaxWidth(),
++                        fontSize = 16.sp,
++                        fontWeight = FontWeight.Medium,
++                        color = if (verificationResult!!.contains("✅")) {
++                            Color(0xFF2E7D32)
++                        } else {
++                            Color(0xFFC62828)
++                        }
++                    )
++                }
++            }
++
++            if (scanResult != null && verificationResult == null) {
++                Spacer(modifier = Modifier.height(16.dp))
++                Text(
++                    text = "📋 QR-Code erkannt!",
++                    fontSize = 14.sp,
++                    color = MaterialTheme.colorScheme.primary
++                )
++                Text(
++                    text = scanResult!!.take(50) + "...",
++                    fontSize = 12.sp,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                    modifier = Modifier.padding(top = 4.dp)
++                )
++            }
++        }
++    }
++}
+\ No newline at end of file
+Index: app/src/main/java/com/sentinel/wallet/crypto/CryptoSelfTest.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/crypto/CryptoSelfTest.kt b/app/src/main/java/com/sentinel/wallet/crypto/CryptoSelfTest.kt
+new file mode 100644
+--- /dev/null	(date 1785119748207)
++++ b/app/src/main/java/com/sentinel/wallet/crypto/CryptoSelfTest.kt	(date 1785119748207)
+@@ -0,0 +1,117 @@
++package com.sentinel.wallet.crypto
++
++import android.util.Log
++import androidx.test.ext.junit.runners.AndroidJUnit4
++import androidx.test.platform.app.InstrumentationRegistry
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++
++
++@RunWith(AndroidJUnit4::class)
++class CryptoSelfTest {
++
++    companion object {
++        private const val TAG = "CryptoSelfTest"
++    }
++
++
++    @Test
++    fun testEd25519CompleteFlow() {
++
++        Log.d(TAG, "========== Sentinel Crypto Self Test ==========")
++
++
++        /*
++         * 1. Generate keypair
++         */
++        val (publicKey, privateKey) =
++            Ed25519Crypto.generateKeyPair()
++
++
++        Log.d(
++            TAG,
++            "Public Key: $publicKey"
++        )
++
++        Log.d(
++            TAG,
++            "Private Key length: ${privateKey.length}"
++        )
++
++
++        /*
++         * Ed25519:
++         * Public key = 32 bytes = 64 hex chars
++         * Secret key = 64 bytes = 128 hex chars
++         */
++        assertTrue(
++            "Public key length invalid",
++            publicKey.length == 64
++        )
++
++        assertTrue(
++            "Private key length invalid",
++            privateKey.length == 128
++        )
++
++
++        /*
++         * 2. Sign test message
++         */
++        val message =
++            "Sentinel crypto self test".toByteArray()
++
++
++        val signature =
++            Ed25519Crypto.signData(
++                privateKey,
++                message
++            )
++
++
++        Log.d(
++            TAG,
++            "Signature: $signature"
++        )
++
++
++        /*
++         * Ed25519 signature:
++         * 64 bytes = 128 hex chars
++         */
++        assertTrue(
++            "Signature length invalid",
++            signature.length == 128
++        )
++
++
++        /*
++         * 3. Verify signature
++         */
++        val verified =
++            Ed25519Crypto.verifySignature(
++                publicKey,
++                message,
++                signature
++            )
++
++
++        Log.d(
++            TAG,
++            "Verification result: $verified"
++        )
++
++
++        assertTrue(
++            "Signature verification failed",
++            verified
++        )
++
++
++        Log.d(
++            TAG,
++            "========== SUCCESS =========="
++        )
++    }
++}
+\ No newline at end of file
+Index: app/src/main/java/com/sentinel/wallet/ui/components/QrScanner.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/sentinel/wallet/ui/components/QrScanner.kt b/app/src/main/java/com/sentinel/wallet/ui/components/QrScanner.kt
+new file mode 100644
+--- /dev/null	(date 1784881601125)
++++ b/app/src/main/java/com/sentinel/wallet/ui/components/QrScanner.kt	(date 1784881601125)
+@@ -0,0 +1,87 @@
++package com.sentinel.wallet.ui.components
++
++import android.Manifest
++import android.content.pm.PackageManager
++import androidx.activity.compose.rememberLauncherForActivityResult
++import androidx.activity.result.contract.ActivityResultContracts
++import androidx.compose.foundation.layout.*
++import androidx.compose.material3.*
++import androidx.compose.runtime.*
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++import androidx.core.content.ContextCompat
++import com.journeyapps.barcodescanner.ScanContract
++import com.journeyapps.barcodescanner.ScanOptions
++
++@Composable
++fun QrScannerButton(
++    onScanResult: (String) -> Unit,
++    modifier: Modifier = Modifier
++) {
++    val context = LocalContext.current
++
++    // Scanner Launcher
++    val scanLauncher = rememberLauncherForActivityResult(
++        contract = ScanContract()
++    ) { result ->
++        if (result.contents != null) {
++            onScanResult(result.contents)
++        }
++    }
++
++    // Permission Launcher
++    val permissionLauncher = rememberLauncherForActivityResult(
++        contract = ActivityResultContracts.RequestPermission()
++    ) { isGranted ->
++        if (isGranted) {
++            // Permission granted → start scanner
++            startScanner(scanLauncher)
++        }
++    }
++
++    Button(
++        onClick = {
++            when {
++                ContextCompat.checkSelfPermission(
++                    context,
++                    Manifest.permission.CAMERA
++                ) == PackageManager.PERMISSION_GRANTED -> {
++                    // Permission already granted → start scanner
++                    startScanner(scanLauncher)
++                }
++                else -> {
++                    // Request permission
++                    permissionLauncher.launch(Manifest.permission.CAMERA)
++                }
++            }
++        },
++        modifier = modifier,
++        colors = ButtonDefaults.buttonColors(
++            containerColor = Color(0xFF4A6CF7)
++        )
++    ) {
++        Text(
++            text = "📷 QR-Code scannen",
++            fontSize = 16.sp,
++            fontWeight = FontWeight.Bold,
++            color = Color.White
++        )
++    }
++}
++
++// Hilfsfunktion zum Starten des Scanners
++private fun startScanner(scanLauncher: androidx.activity.result.ActivityResultLauncher<ScanOptions>) {
++    val options = ScanOptions()
++    options.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
++    options.setPrompt("Scanne den QR-Code der Sentinel Website")
++    options.setCameraId(0)
++    options.setBeepEnabled(false)
++    options.setBarcodeImageEnabled(true)
++    options.setOrientationLocked(false)
++    scanLauncher.launch(options)
++}
+\ No newline at end of file

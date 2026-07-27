@@ -83,7 +83,12 @@ dependencies {
     // Gson (JSON Parsing)
     implementation("com.google.code.gson:gson:2.10.1")
 
-    // Kryptographie (Ed25519)
-    implementation("org.bouncycastle:bcprov-jdk15on:1.70")
-    implementation("org.bouncycastle:bcpkix-jdk15on:1.70")
+    // Kryptographie (Ed25519) azysodium for Android
+    implementation("com.goterl:lazysodium-android:5.1.0@aar")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+
+    // QR-Code Scanning
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+
+
 }

@@ -5,7 +5,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import com.sentinel.wallet.ui.screens.QrScannerScreen
 import com.sentinel.wallet.ui.screens.WalletScreen
 import com.sentinel.wallet.ui.theme.SentinelWalletTheme
 import com.sentinel.wallet.viewmodel.WalletViewModel
@@ -18,10 +20,29 @@ class MainActivity : ComponentActivity() {
                 Surface(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    // Context wird hier übergeben
-                    WalletScreen(
-                        viewModel = WalletViewModel(this)
-                    )
+                    // Navigation zwischen Wallet und Scanner
+                    var currentScreen by remember { mutableStateOf("wallet") }
+
+                    when (currentScreen) {
+                        "wallet" -> {
+                            WalletScreen(
+                                viewModel = WalletViewModel(this),
+                                onOpenScanner = {
+                                    currentScreen = "scanner"
+                                }
+                            )
+                        }
+                        "scanner" -> {
+                            QrScannerScreen(
+                                viewModel = WalletViewModel(this),
+                                onProofResult = { success ->
+                                    // Nach Verifizierung zurück zur Wallet
+                                    currentScreen = "wallet"
+                                }
+                                // onBack wurde entfernt!
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -133,12 +133,95 @@ class WalletViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    fun generateProofWithChallenge(sessionId: String, challenge: String, callback: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            _uiState.update { state ->
+                state.copy(
+                    isProofGenerationInProgress = true,
+                    proofResult = null,
+                    qrVerificationResult = null
+                )
+            }
+
+            try {
+                val currentState = _uiState.value.walletState
+                if (currentState !is WalletState.CredentialLoaded) {
+                    throw Exception("No credential loaded")
+                }
+
+                val credential = currentState.credential
+
+                val proofData = repository.generateLocalProof(
+                    challenge = challenge,
+                    claimType = "AGE_OVER_18",
+                    credential = credential
+                )
+
+                if (proofData == null) {
+                    throw Exception("Local proof generation failed")
+                }
+
+                // ✅ RICHTIG: Verwende den Parameter sessionId (nicht challengeResponse!)
+                val verifyResult = repository.verifyProof(
+                    sessionId,
+                    proofData
+                )
+
+                if (verifyResult.isSuccess && verifyResult.getOrThrow()) {
+                    _uiState.update { state ->
+                        state.copy(
+                            isProofGenerationInProgress = false,
+                            proofResult = ProofResult.Success,
+                            qrVerificationResult = "✅ QR-Verifizierung erfolgreich!"
+                        )
+                    }
+                    callback(true)
+                } else {
+                    throw Exception("Verification failed")
+                }
+
+                delay(5000)
+                _uiState.update { state ->
+                    state.copy(
+                        proofResult = null,
+                        qrVerificationResult = null
+                    )
+                }
+
+            } catch (e: Exception) {
+                _uiState.update { state ->
+                    state.copy(
+                        isProofGenerationInProgress = false,
+                        proofResult = ProofResult.Failure(e.message ?: "Unknown error"),
+                        qrVerificationResult = "❌ QR-Verifizierung fehlgeschlagen: ${e.message}"
+                    )
+                }
+                callback(false)
+
+                delay(5000)
+                _uiState.update { state ->
+                    state.copy(
+                        proofResult = null,
+                        qrVerificationResult = null
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearQrResult() {
+        _uiState.update { state ->
+            state.copy(qrVerificationResult = null)
+        }
+    }
+
     fun resetState() {
         _uiState.update { state ->
             state.copy(
                 selectedClaim = null,
                 proofResult = null,
-                isProofGenerationInProgress = false
+                isProofGenerationInProgress = false,
+                qrVerificationResult = null
             )
         }
     }

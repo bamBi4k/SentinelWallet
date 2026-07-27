@@ -1,79 +1,97 @@
 package com.sentinel.wallet.crypto
 
-import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
-import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
-import org.bouncycastle.crypto.signers.Ed25519Signer
-import org.bouncycastle.util.encoders.Hex
-import java.security.SecureRandom
+import android.util.Log
+import com.goterl.lazysodium.LazySodiumAndroid
+import com.goterl.lazysodium.SodiumAndroid
+import com.goterl.lazysodium.utils.Key
+import com.goterl.lazysodium.utils.KeyPair
 
 object Ed25519Crypto {
 
-    private val secureRandom = SecureRandom()
+    private const val TAG = "Ed25519Crypto"
 
-    /**
-     * Generiert ein Ed25519 Schlüsselpaar
-     * @return Pair(privatKeyHex, publicKeyHex)
-     */
+    private val lazySodium = LazySodiumAndroid(SodiumAndroid())
+
+    init {
+        Log.d(TAG, "✅ LazySodium initialized")
+    }
+
     fun generateKeyPair(): Pair<String, String> {
-        // Generiere 32 Byte privaten Schlüssel
-        val privateKeyBytes = ByteArray(32)
-        secureRandom.nextBytes(privateKeyBytes)
-
-        // Erstelle private und public Key
-        val privateKey = Ed25519PrivateKeyParameters(privateKeyBytes, 0)
-        val publicKey = privateKey.generatePublicKey()
-
-        return Pair(
-            Hex.toHexString(privateKeyBytes),
-            Hex.toHexString(publicKey.encoded)
-        )
-    }
-
-    /**
-     * Signiert Daten mit Ed25519
-     * @param privateKeyHex Privater Schlüssel als Hex-String
-     * @param data Daten die signiert werden sollen
-     * @return Signatur als Hex-String
-     */
-    fun signData(privateKeyHex: String, data: ByteArray): String {
-        val privateKeyBytes = Hex.decode(privateKeyHex)
-        val privateKey = Ed25519PrivateKeyParameters(privateKeyBytes, 0)
-
-        val signer = Ed25519Signer()
-        signer.init(true, privateKey)
-        signer.update(data, 0, data.size)
-
-        val signature = signer.generateSignature()
-        return Hex.toHexString(signature)
-    }
-
-    /**
-     * Verifiziert eine Signatur
-     * @param publicKeyHex Öffentlicher Schlüssel als Hex-String
-     * @param data Ursprüngliche Daten
-     * @param signatureHex Signatur als Hex-String
-     * @return true wenn Signatur gültig
-     */
-    fun verifySignature(publicKeyHex: String, data: ByteArray, signatureHex: String): Boolean {
         try {
-            val publicKeyBytes = Hex.decode(publicKeyHex)
-            val publicKey = Ed25519PublicKeyParameters(publicKeyBytes, 0)
-            val signatureBytes = Hex.decode(signatureHex)
+            val keyPair: KeyPair = lazySodium.cryptoSignKeypair()
 
-            val signer = Ed25519Signer()
-            signer.init(false, publicKey)
-            signer.update(data, 0, data.size)
+            val publicKeyHex = keyPair.publicKey.asHexString
+            val privateKeyHex = keyPair.secretKey.asHexString
 
-            return signer.verifySignature(signatureBytes)
+            Log.d(TAG, "✅ Key pair generated")
+            Log.d(TAG, "Public key length: ${publicKeyHex.length}")
+            Log.d(TAG, "Private key length: ${privateKeyHex.length}")
+
+            // IMPORTANT:
+            // Repository expects Pair(privateKey, publicKey)
+            return Pair(privateKeyHex, publicKeyHex)
+
         } catch (e: Exception) {
-            return false
+            Log.e(TAG, "❌ Failed to generate key pair: ${e.message}")
+            throw e
         }
     }
 
-    /**
-     * Konvertiert einen öffentlichen Schlüssel für die Übertragung
-     */
+
+    fun signData(privateKeyHex: String, data: ByteArray): String {
+        return try {
+            val privateKey = Key.fromHexString(privateKeyHex)
+
+            val message = data.toString(Charsets.UTF_8)
+
+            val signature = lazySodium.cryptoSignDetached(
+                message,
+                privateKey
+            )
+
+            Log.d(TAG, "✅ Data signed")
+
+            signature
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Signing failed: ${e.message}")
+            throw e
+        }
+    }
+
+
+    fun verifySignature(
+        publicKeyHex: String,
+        data: ByteArray,
+        signatureHex: String
+    ): Boolean {
+
+        return try {
+            val publicKey = Key.fromHexString(publicKeyHex)
+
+            val message = data.toString(Charsets.UTF_8)
+
+            lazySodium.cryptoSignVerifyDetached(
+                signatureHex,
+                message,
+                publicKey
+            )
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Verification failed: ${e.message}")
+            false
+        }
+    }
+
+
     fun encodePublicKey(publicKeyHex: String): String {
         return publicKeyHex
+    }
+
+
+    private fun ByteArray.toHexString(): String {
+        return joinToString("") {
+            "%02x".format(it)
+        }
     }
 }
