@@ -26,15 +26,31 @@ import com.sentinel.wallet.ui.WalletUiState
 import com.sentinel.wallet.ui.components.ClaimCard
 import com.sentinel.wallet.ui.components.StatusBadge
 import com.sentinel.wallet.viewmodel.WalletViewModel
+import androidx.compose.runtime.LaunchedEffect
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WalletScreen(
     viewModel: WalletViewModel = viewModel(),
-    onOpenScanner: () -> Unit = {}
+    onOpenScanner: () -> Unit = {},
+    scannedQrResult: String? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    if (scannedQrResult != null) {
+        handleQrResult(
+            scannedQrResult,
+            viewModel
+        )
+    }
+
+    scannedQrResult?.let { qr ->
+        handleQrResult(
+            qr,
+            viewModel
+        )
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -46,32 +62,28 @@ fun WalletScreen(
                     )
                 },
                 actions = {
-                    // QR-Code Scanner Button
-                    IconButton(onClick = onOpenScanner) {
-                        Icon(
-                            imageVector = Icons.Default.QrCodeScanner,
-                            contentDescription = "QR-Code scannen"
-                        )
-                    }
-                    IconButton(onClick = { viewModel.refresh() }) {
+
+                    IconButton(
+                        onClick = { viewModel.refresh() }
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Refresh"
                         )
                     }
+
                 }
             )
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { viewModel.generateProof() },
+                onClick = onOpenScanner,
                 containerColor = MaterialTheme.colorScheme.primary,
                 shape = RoundedCornerShape(16.dp)
             ) {
-                Text(
-                    text = "Present Proof",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
+                Icon(
+                    imageVector = Icons.Default.QrCodeScanner,
+                    contentDescription = "Scan verification QR"
                 )
             }
         }
@@ -148,7 +160,7 @@ fun NoCredentialState() {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Request a credential from Sentinel Authority",
+                text = "Scan a Sentinel verification QR code to prove your identity",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -344,7 +356,7 @@ fun ProofResultCard(
             when (result) {
                 is ProofResult.Success -> {
                     Text(
-                        text = "✅ Proof Generated Successfully!",
+                        text = "✅ Identity Verified Successfully!",
                         fontSize = 16.sp,
                         color = Color(0xFF2E7D32)
                     )
@@ -439,5 +451,58 @@ fun ErrorState(
                 Text("Retry")
             }
         }
+    }
+}
+
+@Composable
+fun handleQrResult(
+    qrData: String,
+    viewModel: WalletViewModel
+) {
+
+    LaunchedEffect(qrData) {
+
+        try {
+
+            val uri =
+                android.net.Uri.parse(qrData)
+
+
+            if (
+                uri.scheme == "sentinel" &&
+                uri.host == "verify"
+            ) {
+
+
+                val sessionId =
+                    uri.getQueryParameter("session_id")
+
+
+                val challenge =
+                    uri.getQueryParameter("challenge")
+
+
+                if (
+                    sessionId != null &&
+                    challenge != null
+                ) {
+
+
+                    viewModel.generateProofWithChallenge(
+                        sessionId,
+                        challenge
+                    )
+
+                }
+
+            }
+
+
+        } catch (e: Exception) {
+
+            e.printStackTrace()
+
+        }
+
     }
 }

@@ -13,38 +13,72 @@ import com.sentinel.wallet.ui.theme.SentinelWalletTheme
 import com.sentinel.wallet.viewmodel.WalletViewModel
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
+
         super.onCreate(savedInstanceState)
+
         setContent {
+
             SentinelWalletTheme {
+
                 Surface(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    // Navigation zwischen Wallet und Scanner
-                    var currentScreen by remember { mutableStateOf("wallet") }
+
+
+                    var currentScreen by remember {
+                        mutableStateOf("wallet")
+                    }
+
+
+                    val walletViewModel = remember {
+                        WalletViewModel(this)
+                    }
+
+
+                    var scannedQrResult by remember {
+                        mutableStateOf<String?>(null)
+                    }
+
+
 
                     when (currentScreen) {
+
+
                         "wallet" -> {
+
+
                             WalletScreen(
-                                viewModel = WalletViewModel(this),
+
+                                viewModel = walletViewModel,
+
                                 onOpenScanner = {
+
                                     currentScreen = "scanner"
+
                                 }
+
                             )
+
                         }
+
                         "scanner" -> {
                             QrScannerScreen(
-                                viewModel = WalletViewModel(this),
-                                onProofResult = { success ->
-                                    // Nach Verifizierung zurück zur Wallet
+                                viewModel = walletViewModel,
+                                onBack = {
                                     currentScreen = "wallet"
                                 }
-                                // onBack wurde entfernt!
                             )
                         }
+
                     }
+
                 }
+
             }
+
         }
+
     }
 }

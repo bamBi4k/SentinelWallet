@@ -11,19 +11,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sentinel.wallet.ui.components.QrScannerButton
 import com.sentinel.wallet.viewmodel.WalletViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QrScannerScreen(
-    viewModel: WalletViewModel = viewModel(),
-    onProofResult: (Boolean) -> Unit = {}
+    viewModel: WalletViewModel,
+    onBack: () -> Unit = {}
 ) {
+
     var scanResult by remember { mutableStateOf<String?>(null) }
     var isVerifying by remember { mutableStateOf(false) }
     var verificationResult by remember { mutableStateOf<String?>(null) }
+
 
     Scaffold(
         topBar = {
@@ -38,7 +39,7 @@ fun QrScannerScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = {
-                            onProofResult(false)
+                            onBack()
                         }
                     ) {
                         Icon(
@@ -50,6 +51,7 @@ fun QrScannerScreen(
             )
         }
     ) { paddingValues ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -58,113 +60,130 @@ fun QrScannerScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
+
             Text(
                 text = "🛡️ QR-Code Verifizierung",
                 fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 16.dp)
+                fontWeight = FontWeight.Bold
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
 
             Text(
-                text = "Scanne den QR-Code von der Sentinel Website",
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 32.dp)
+                text = "Scanne den QR-Code der Sentinel Website",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+
             QrScannerButton(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+
                 onScanResult = { result ->
+
                     scanResult = result
                     isVerifying = true
                     verificationResult = null
 
-                    // Extrahiere session_id und challenge aus dem QR-Code
-                    val params = result.substringAfter("?").split("&")
-                    var sessionId = ""
-                    var challenge = ""
 
-                    params.forEach { param ->
-                        when {
-                            param.startsWith("session_id=") -> {
-                                sessionId = param.substringAfter("=")
-                            }
-                            param.startsWith("challenge=") -> {
-                                challenge = param.substringAfter("=")
-                            }
-                        }
-                    }
+                    val uri = android.net.Uri.parse(result)
 
-                    if (sessionId.isNotEmpty() && challenge.isNotEmpty()) {
-                        viewModel.generateProofWithChallenge(sessionId, challenge) { success ->
-                            isVerifying = false
-                            if (success) {
-                                verificationResult = "✅ Verifizierung erfolgreich!"
-                                onProofResult(true)
-                            } else {
-                                verificationResult = "❌ Verifizierung fehlgeschlagen"
-                                onProofResult(false)
-                            }
-                        }
-                    } else {
+                    val sessionId =
+                        uri.getQueryParameter("session_id")
+
+                    val challenge =
+                        uri.getQueryParameter("challenge")
+
+
+                    if (
+                        sessionId != null &&
+                        challenge != null
+                    ) {
+
+                        viewModel.generateProofWithChallenge(
+                            sessionId = sessionId,
+                            challenge = challenge
+                        )
+
                         isVerifying = false
-                        verificationResult = "❌ Ungültiger QR-Code"
+
+                        verificationResult =
+                            "✅ Proof wird gesendet..."
+
+
+                    } else {
+
+                        isVerifying = false
+
+                        verificationResult =
+                            "❌ Ungültiger Sentinel QR-Code"
                     }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
+                }
             )
 
+
             if (isVerifying) {
+
                 Spacer(modifier = Modifier.height(24.dp))
+
                 CircularProgressIndicator()
+
                 Text(
-                    text = "Verifiziere...",
-                    modifier = Modifier.padding(top = 8.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "Verifiziere Proof...",
+                    modifier = Modifier.padding(top = 8.dp)
                 )
             }
 
-            if (verificationResult != null) {
+
+            verificationResult?.let { result ->
+
                 Spacer(modifier = Modifier.height(24.dp))
+
+
                 Card(
                     modifier = Modifier.fillMaxWidth(),
+
                     colors = CardDefaults.cardColors(
-                        containerColor = if (verificationResult!!.contains("✅")) {
-                            Color(0xFFE8F5E9)
-                        } else {
-                            Color(0xFFFFEBEE)
-                        }
+                        containerColor =
+                            if (result.contains("✅"))
+                                Color(0xFFE8F5E9)
+                            else
+                                Color(0xFFFFEBEE)
                     )
+
                 ) {
+
                     Text(
-                        text = verificationResult!!,
+                        text = result,
+
                         modifier = Modifier
                             .padding(16.dp)
                             .fillMaxWidth(),
+
                         fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (verificationResult!!.contains("✅")) {
-                            Color(0xFF2E7D32)
-                        } else {
-                            Color(0xFFC62828)
-                        }
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            if (scanResult != null && verificationResult == null) {
+
+            scanResult?.let {
+
                 Spacer(modifier = Modifier.height(16.dp))
+
                 Text(
-                    text = "📋 QR-Code erkannt!",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.primary
+                    text = "QR erkannt:",
+                    fontWeight = FontWeight.Bold
                 )
+
                 Text(
-                    text = scanResult!!.take(50) + "...",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp)
+                    text = it.take(80),
+                    fontSize = 12.sp
                 )
             }
         }

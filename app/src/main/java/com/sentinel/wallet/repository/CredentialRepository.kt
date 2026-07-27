@@ -2,7 +2,6 @@ package com.sentinel.wallet.repository
 
 import android.content.Context
 import android.util.Log
-import com.google.gson.Gson
 import com.sentinel.wallet.crypto.Ed25519Crypto
 import com.sentinel.wallet.models.Claim
 import com.sentinel.wallet.models.Credential
@@ -16,7 +15,6 @@ import java.time.Instant
 class CredentialRepository(private val context: Context) {
 
     private val keyStore = SecureKeyStore(context)
-    private val gson = Gson()
 
     fun ensureWalletKeys(): Pair<String, String> {
         val privateKey = keyStore.getPrivateKey()

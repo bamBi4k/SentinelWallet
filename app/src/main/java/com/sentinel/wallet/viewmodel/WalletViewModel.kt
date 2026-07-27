@@ -4,8 +4,6 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sentinel.wallet.models.Claim
-import com.sentinel.wallet.models.Credential
-import com.sentinel.wallet.models.network.ProofData
 import com.sentinel.wallet.repository.CredentialRepository
 import com.sentinel.wallet.ui.ProofResult
 import com.sentinel.wallet.ui.WalletState
@@ -133,8 +131,12 @@ class WalletViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun generateProofWithChallenge(sessionId: String, challenge: String, callback: (Boolean) -> Unit) {
+    fun generateProofWithChallenge(
+        sessionId: String,
+        challenge: String
+    ) {
         viewModelScope.launch {
+
             _uiState.update { state ->
                 state.copy(
                     isProofGenerationInProgress = true,
@@ -144,43 +146,72 @@ class WalletViewModel(private val context: Context) : ViewModel() {
             }
 
             try {
+
                 val currentState = _uiState.value.walletState
+
                 if (currentState !is WalletState.CredentialLoaded) {
                     throw Exception("No credential loaded")
                 }
 
                 val credential = currentState.credential
 
+
+                // Create signed proof using QR challenge
                 val proofData = repository.generateLocalProof(
                     challenge = challenge,
                     claimType = "AGE_OVER_18",
                     credential = credential
                 )
 
+
                 if (proofData == null) {
                     throw Exception("Local proof generation failed")
                 }
 
-                // ✅ RICHTIG: Verwende den Parameter sessionId (nicht challengeResponse!)
-                val verifyResult = repository.verifyProof(
+
+                /*
+                 * IMPORTANT:
+                 *
+                 * QR flow:
+                 *
+                 * Wallet
+                 *   |
+                 *   |
+                 *   v
+                 * /qr/verify
+                 *
+                 */
+
+                val verifyResult = repository.verifyQrProof(
                     sessionId,
                     proofData
                 )
 
+
                 if (verifyResult.isSuccess && verifyResult.getOrThrow()) {
+
                     _uiState.update { state ->
                         state.copy(
                             isProofGenerationInProgress = false,
                             proofResult = ProofResult.Success,
-                            qrVerificationResult = "✅ QR-Verifizierung erfolgreich!"
+                            qrVerificationResult =
+                                "✅ Identity verified successfully!"
                         )
                     }
-                    callback(true)
+
+
+
                 } else {
-                    throw Exception("Verification failed")
+
+                    throw Exception(
+                        verifyResult.exceptionOrNull()?.message
+                            ?: "QR verification failed"
+                    )
                 }
 
+
                 delay(5000)
+
                 _uiState.update { state ->
                     state.copy(
                         proofResult = null,
@@ -188,17 +219,25 @@ class WalletViewModel(private val context: Context) : ViewModel() {
                     )
                 }
 
+
             } catch (e: Exception) {
+
+
                 _uiState.update { state ->
                     state.copy(
                         isProofGenerationInProgress = false,
-                        proofResult = ProofResult.Failure(e.message ?: "Unknown error"),
-                        qrVerificationResult = "❌ QR-Verifizierung fehlgeschlagen: ${e.message}"
+                        proofResult =
+                            ProofResult.Failure(
+                                e.message ?: "Unknown error"
+                            ),
+                        qrVerificationResult =
+                            "❌ Verification failed: ${e.message}"
                     )
                 }
-                callback(false)
+
 
                 delay(5000)
+
                 _uiState.update { state ->
                     state.copy(
                         proofResult = null,
