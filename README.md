@@ -1,33 +1,53 @@
-| Component           | Standard                                        |
-| ------------------- | ----------------------------------------------- |
-| Signature Algorithm | Ed25519                                         |
-| Private Key         | Raw 32-byte seed (hex encoded = 64 chars)       |
-| Public Key          | Raw 32-byte public key (hex encoded = 64 chars) |
-| Signature           | Raw 64 bytes (hex encoded = 128 chars)          |
-| Message Encoding    | UTF-8                                           |
-| Serialization       | Canonical format (we'll define this later)      |
+                 User
+                  |
+                  |
+          Android Sentinel Wallet
+                  |
+                  |
+        1. Scan QR code
+                  |
+                  ↓
 
+        Verifier Website
 
-The cleanup roadmap
+        "I need proof of AGE_OVER_18"
 
-Phase A — Crypto Foundation
+                  |
+                  |
+        Generates challenge
+                  |
+                  ↓
 
-Goal:
+             QR Code
 
-Android
+                  |
+                  |
+        Wallet scans QR
 
-↓
+                  |
+                  ↓
 
-Generate Keypair
+        Wallet creates proof
 
-↓
+        {
+          challenge,
+          claim,
+          public_key,
+          signature
+        }
 
-Sign "Hello Sentinel"
+                  |
+                  ↓
 
-↓
+        Wallet sends proof back
 
-Backend verifies
+                  |
+                  ↓
 
-↓
+        Backend verifies
 
-PASS
+                  |
+                  ↓
+
+        Website receives:
+        "Verified ✅"
