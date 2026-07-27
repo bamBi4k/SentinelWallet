@@ -1,53 +1,58 @@
-                 User
-                  |
-                  |
-          Android Sentinel Wallet
-                  |
-                  |
-        1. Scan QR code
-                  |
-                  ↓
+Browser
+   |
+   |  GET /qr/generate
+   |
+   ↓
+QR generated
+(session_id + challenge)
 
-        Verifier Website
+   |
+   |  Scan QR
+   ↓
 
-        "I need proof of AGE_OVER_18"
+Android Wallet
+   |
+   | Parse:
+   | sentinel://verify?
+   | session_id=...
+   | challenge=...
+   |
+   ↓
 
-                  |
-                  |
-        Generates challenge
-                  |
-                  ↓
+WalletViewModel
+   |
+   | generateProofWithChallenge()
+   |
+   ↓
 
-             QR Code
+Ed25519 Signature created
+   |
+   ↓
 
-                  |
-                  |
-        Wallet scans QR
+POST /qr/verify
 
-                  |
-                  ↓
+   |
+   ↓
 
-        Wallet creates proof
+Backend
+   |
+   | Verify signature
+   | Verify public key
+   | Verify challenge
+   | Verify policy AGE_OVER_18
+   |
+   ↓
 
-        {
-          challenge,
-          claim,
-          public_key,
-          signature
-        }
+qr_generator.mark_used()
 
-                  |
-                  ↓
+   |
+   ↓
 
-        Wallet sends proof back
+Browser polling:
 
-                  |
-                  ↓
+GET /qr/check/<session_id>
 
-        Backend verifies
+   |
+   ↓
 
-                  |
-                  ↓
-
-        Website receives:
-        "Verified ✅"
+✅ Verifizierung erfolgreich! Zugriff gewährt.
